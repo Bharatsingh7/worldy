@@ -72,6 +72,7 @@ typedef struct {
   double F[3];       /* ψ·HLLC flux, in face-normal frame */
   double PL, PR;     /* pressure corrections per side (already × ψ / porosity reaction) */
   double TL, TR;     /* upwind temperature for heat transport */
+  double delta;      /* size of the change this face makes (mass + momentum) */
   double *cursor;
 } Face;
 
@@ -168,6 +169,29 @@ double sim_block_dt(Sim *s, int b) {
     }
   if (smax <= 0) return s->dtMaxCap;
   return w_min(s->dtMaxCap, s->cfl / smax);
+}
+
+/* Still: every cell dry or a flat pond at rest (|u| < 1 mm/s, surface level within 1 mm of its neighbours). */
+int sim_block_is_still(Sim *s, int b) {
+  int nx = s->nx;
+  int bx = b % s->bnx, by = b / s->bnx;
+  int x0 = bx * BS, y0 = by * BS, x1 = w_min(x0 + BS, nx), y1 = w_min(y0 + BS, s->ny);
+  for (int y = y0; y < y1; y++)
+    for (int x = x0; x < x1; x++) {
+      int c = y * nx + x;
+      double h = s->h[c];
+      if (h <= H_DRY) continue;
+      if (w_fabs(s->qx[c]) > 1e-3 * h || w_fabs(s->qy[c]) > 1e-3 * h) return 0;
+      double eta = h + s->z[c];
+      int nb[4] = {x > 0 ? c - 1 : -1, x < nx - 1 ? c + 1 : -1, y > 0 ? c - nx : -1, y < s->ny - 1 ? c + nx : -1};
+      for (int k = 0; k < 4; k++) {
+        int o = nb[k];
+        if (o < 0) continue;
+        double ho = s->h[o];
+        if (ho > H_DRY ? w_fabs(ho + s->z[o] - eta) > 1e-3 : s->z[o] < eta - 1e-3) return 0;
+      }
+    }
+  return 1;
 }
 
 int sim_block_is_dry(Sim *s, int b) {
@@ -328,6 +352,7 @@ void sim_block_advance(Sim *s, int b, double tEnd) {
       double out = outflow[LOCAL(donor)];
       if (out > s->h[donor]) scale = s->h[donor] / out;
     }
+    f->delta = (w_fabs(scale * m) + w_fabs(scale * f->F[1]) + w_fabs(f->PL) + w_fabs(f->PR)) * f->dur * f->inv;
     if (f->L >= 0) add_cell(s, f->L, -1.0, scale, f);
     if (f->R >= 0) add_cell(s, f->R, +1.0, scale, f);
     /* domain boundary accounting (volume leaving through open / level edges) */
@@ -352,13 +377,14 @@ void sim_block_advance(Sim *s, int b, double tEnd) {
   for (int y = y0; y < y1; y++)
     for (int x = x0; x < x1; x++) sources(s, y * nx + x, dt, s->bt[b]);
 
-  /* 6. Neighbouring blocks that received water wake up. */
+  /* 6. Sleeping neighbours wake when this block actually changed them (dry ground getting
+   *    water, or a still pond being disturbed); a face at rest contributes exactly zero. */
   for (int k = 0; k < nf; k++) {
     Face *f = &faces[k];
     int other = -1;
     if (f->L >= 0 && (f->L % nx < x0 || f->L % nx >= x1 || f->L / nx < y0 || f->L / nx >= y1)) other = f->L;
     if (f->R >= 0 && (f->R % nx < x0 || f->R % nx >= x1 || f->R / nx < y0 || f->R / nx >= y1)) other = f->R;
-    if (other >= 0 && s->h[other] > H_DRY) {
+    if (other >= 0 && s->h[other] > H_DRY && f->delta > 1e-9) {
       int ob = ((other / nx) / BS) * s->bnx + (other % nx) / BS;
       if (!s->awake[ob]) sim_wake(s, ob, tEnd);
     }

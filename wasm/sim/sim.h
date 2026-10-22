@@ -65,6 +65,7 @@ typedef struct {
 void sim_block_advance(Sim *s, int b, double tEnd);
 double sim_block_dt(Sim *s, int b);
 int sim_block_is_dry(Sim *s, int b);
+int sim_block_is_still(Sim *s, int b);
 
 /* edlts.c */
 void sim_wake(Sim *s, int b, double t);

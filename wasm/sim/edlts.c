@@ -6,8 +6,9 @@
  * neighbours. Instead of cycling through levels synchronously (classic LTS), blocks are
  * processed as events in a priority queue ordered by their current time — always the block
  * that is furthest behind goes next, so no block ever runs ahead of an older neighbour's state.
- * Dry blocks without rain or inflow are removed from the queue entirely ("asleep") and are
- * woken when water crosses into them. Face time cursors (swe.c) make every face flux count
+ * Blocks without rain or inflow that are dry — or hold a still, flat pond — are removed from the
+ * queue entirely ("asleep"), and are woken only when a neighbour's flux actually changes them.
+ * After a storm, filled depressions stop costing anything. Face time cursors (swe.c) make every face flux count
  * exactly once, so mass is conserved to round-off.
  *
  * lts = 0 runs the same code with one global step (reference mode for tests).
@@ -260,8 +261,8 @@ EXPORT(sim_advance) double sim_advance(Sim *s, double tTarget, int maxEvents) {
     s->bt[b] = tEnd;
     s->bdt[b] = dt;
     events++;
-    if (sim_block_is_dry(s, b) && !block_has_forcing(s, b)) {
-      s->awake[b] = 0; /* falls asleep; neighbours wake it when water arrives */
+    if (!block_has_forcing(s, b) && sim_block_is_still(s, b)) {
+      s->awake[b] = 0; /* dry or a pond at rest: sleeps until a neighbour changes it */
       continue;
     }
     heap_push(&s->queue, b, tEnd);
