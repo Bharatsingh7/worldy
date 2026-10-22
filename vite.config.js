@@ -1,8 +1,9 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import cesium from 'vite-plugin-cesium';
+import aisRelay from './server/aisRelay.js';
 
-// OpenSky and adsb.lol don't send CORS headers, so the browser reaches them through these proxies.
+// These services don't send CORS headers, so the browser reaches them through these proxies.
 const proxy = {
   '/api/opensky': {
     target: 'https://opensky-network.org',
@@ -14,22 +15,28 @@ const proxy = {
     changeOrigin: true,
     rewrite: (path) => path.replace(/^\/api\/adsb/, ''),
   },
+  '/api/etopo': {
+    target: 'https://upwell.pfeg.noaa.gov',
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/api\/etopo/, '/erddap/griddap'),
+  },
 };
 
-export default defineConfig({
-  plugins: [
-    react(),
-    cesium(),
-  ],
-  server: {
-    port: 3000,
-    open: true,
-    proxy,
-  },
-  preview: {
-    proxy,
-  },
-  build: {
-    chunkSizeWarningLimit: 4000,
-  },
+export default defineConfig(({ mode }) => {
+  // AISSTREAM_KEY (no VITE_ prefix) stays on the server — never shipped to the browser
+  const env = loadEnv(mode, process.cwd(), '');
+  return {
+    plugins: [react(), cesium(), aisRelay(env.AISSTREAM_KEY)],
+    server: {
+      port: 3000,
+      open: true,
+      proxy,
+    },
+    preview: {
+      proxy,
+    },
+    build: {
+      chunkSizeWarningLimit: 4000,
+    },
+  };
 });

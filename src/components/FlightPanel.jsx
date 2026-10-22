@@ -19,7 +19,7 @@ const fmtAlt = (ft) => (ft >= MAX_ALT_FT ? 'any' : `${(ft / 1000).toFixed(0)}k f
 /**
  * Flights tab — feed toggle, filters, callsign search and the forecast simulator.
  */
-export default function FlightPanel({ flights }) {
+export default function FlightPanel({ flights, embedded = false }) {
   const { enabled, setEnabled, filter, setFilter, forecastMin, setForecastMin, stats, feeds, findFlight } = flights;
   const [query, setQuery] = useState('');
   const [notFound, setNotFound] = useState(false);
@@ -31,7 +31,7 @@ export default function FlightPanel({ flights }) {
 
   return (
     <div className="flight-panel">
-      <section className="layer-section">
+      {!embedded && <section className="layer-section">
         <div className="toggle-row" onClick={() => setEnabled(!enabled)}>
           <div className="toggle-row-info">
             <div className="toggle-row-icon">✈️</div>
@@ -44,7 +44,7 @@ export default function FlightPanel({ flights }) {
           </div>
           <div className={`toggle-switch ${enabled ? 'on' : ''}`} />
         </div>
-      </section>
+      </section>}
 
       {enabled && (
         <>

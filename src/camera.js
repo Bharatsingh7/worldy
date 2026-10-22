@@ -8,6 +8,7 @@
 
 import {
   BoundingSphere,
+  Cartesian2,
   Cartesian3,
   Cartographic,
   EllipsoidTerrainProvider,
@@ -21,6 +22,14 @@ import {
 const CLEARANCE = 60;
 
 export const hasTerrain = (viewer) => !(viewer.terrainProvider instanceof EllipsoidTerrainProvider);
+
+/** Lat/lon (deg) at the centre of the screen, or under the camera if looking at space. */
+export function viewCenter(viewer) {
+  const canvas = viewer.scene.canvas;
+  const hit = viewer.camera.pickEllipsoid(new Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2));
+  const carto = hit ? Cartographic.fromCartesian(hit) : viewer.camera.positionCartographic;
+  return { lat: CesiumMath.toDegrees(carto.latitude), lon: CesiumMath.toDegrees(carto.longitude) };
+}
 
 /** Ground height at a point (0 when terrain is off or unavailable). */
 export async function groundHeight(viewer, lon, lat) {

@@ -8,14 +8,19 @@ import FlightPanel from './components/FlightPanel';
 import FlightInfoCard from './components/FlightInfoCard';
 import OverlayList from './components/OverlayList';
 import SettingsPanel from './components/SettingsPanel';
+import DataLayersPanel from './components/DataLayersPanel';
+import InfoCard from './components/InfoCard';
 import { loadPerfMode, savePerfMode } from './perf';
+import { flyToSafe } from './camera';
 import useFlights from './flights/useFlights';
+import useDataLayers from './datalayers/useDataLayers';
+import usePicking from './usePicking';
 
 /**
  * Worldy — Main application shell.
  *
- * Layout: top bar (brand + search) · right side panel (Map / Overlays / Flights)
- * · flight card bottom-left · nav controls bottom-right · status bar along the bottom.
+ * Layout: top bar (brand + search) · right side panel (Map / Layers / Tools / Settings)
+ * · info cards bottom-left · nav controls bottom-right · status bar along the bottom.
  */
 export default function App() {
   // Globe state
@@ -39,6 +44,24 @@ export default function App() {
   }, []);
 
   const flights = useFlights(viewer);
+  const dataLayers = useDataLayers(viewer);
+
+  // One card at a time: picking a layer item closes the flight card and vice versa
+  const { select } = flights;
+  const [picked, setPicked] = usePicking(viewer, { onPick: () => select(null) });
+  useEffect(() => {
+    if (flights.selectedId) setPicked(null);
+  }, [flights.selectedId, setPicked]);
+
+  // Let the picked layer highlight its item (e.g. satellite track + footprint)
+  const { get: getLayer } = dataLayers;
+  useEffect(() => {
+    if (!picked) return;
+    const layer = getLayer(picked.layerId);
+    layer?.setSelected?.(picked.key);
+    return () => layer?.setSelected?.(null);
+  }, [picked, getLayer]);
+  const pickedLayer = picked ? getLayer(picked.layerId) : null;
 
   const handleViewerReady = useCallback((v, credits) => {
     if (import.meta.env.DEV) window.__worldyViewer = v; // for debugging / automated checks
@@ -64,14 +87,16 @@ export default function App() {
     setOverlayOpacity((prev) => ({ ...prev, [overlayId]: value }));
   }, []);
 
-  // Keyboard shortcuts: L panel · Esc close flight · H home · N north · +/- zoom · / search
-  const { select } = flights;
+  // Keyboard shortcuts: L panel · Esc close card · H home · N north · +/- zoom · / search
   useEffect(() => {
     const click = (id) => document.getElementById(id)?.click();
     const onKey = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea')) return;
       const actions = {
-        Escape: () => select(null),
+        Escape: () => {
+          select(null);
+          setPicked(null);
+        },
         l: () => setIsPanelOpen((p) => !p),
         h: () => click('btn-home'),
         n: () => click('btn-north'),
@@ -88,10 +113,10 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [select]);
+  }, [select, setPicked]);
 
   return (
-    <div className={`app-shell ${flights.selectedId ? 'has-flight' : ''}`} id="app-shell">
+    <div className={`app-shell ${flights.selectedId || pickedLayer ? 'has-flight' : ''}`} id="app-shell">
       {/* 3D Globe */}
       <Globe
         activeImageryId={activeImageryId}
@@ -108,7 +133,7 @@ export default function App() {
       <header className="top-bar">
         <div className="brand-mark glass-panel" id="brand-mark">
           <span className="brand-name">Worldy</span>
-          <span className="brand-version">v1.1</span>
+          <span className="brand-version">v2.0</span>
         </div>
         <SearchBar viewer={viewer} />
       </header>
@@ -123,27 +148,41 @@ export default function App() {
         onTerrainExaggerationChange={setTerrainExaggeration}
         tabs={[
           {
-            id: 'overlays',
-            label: 'Overlays',
-            badge: activeOverlays.length,
+            id: 'layers',
+            label: 'Layers',
+            badge: Object.values(dataLayers.enabled).filter(Boolean).length + (flights.enabled ? 1 : 0) + activeOverlays.length,
             content: (
-              <OverlayList
-                activeOverlays={activeOverlays}
-                onOverlayToggle={handleOverlayToggle}
-                overlayOpacity={overlayOpacity}
-                onOverlayOpacityChange={handleOverlayOpacity}
+              <DataLayersPanel
+                dataLayers={dataLayers}
+                flights={flights}
+                flightsSettings={<FlightPanel flights={flights} embedded />}
+                overlays={
+                  <OverlayList
+                    activeOverlays={activeOverlays}
+                    onOverlayToggle={handleOverlayToggle}
+                    overlayOpacity={overlayOpacity}
+                    onOverlayOpacityChange={handleOverlayOpacity}
+                  />
+                }
               />
             ),
           },
-          { id: 'flights', label: 'Flights', content: <FlightPanel flights={flights} /> },
           { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} /> },
         ]}
         isOpen={isPanelOpen}
         onToggle={() => setIsPanelOpen((p) => !p)}
       />
 
-      {/* Selected flight */}
+      {/* Selected flight / picked layer item */}
       <FlightInfoCard flights={flights} />
+      {pickedLayer && (
+        <InfoCard
+          layer={pickedLayer}
+          itemKey={picked.key}
+          onClose={() => setPicked(null)}
+          onFlyTo={(d) => flyToSafe(viewer, { lon: d.lon, lat: d.lat, range: Math.max((d.altM || 0) * 2, 40_000) })}
+        />
+      )}
 
       {/* Navigation Controls */}
       <NavControls viewer={viewer} />

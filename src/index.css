@@ -996,6 +996,104 @@ input[type="range"]::-moz-range-thumb {
   color: var(--color-text-secondary);
 }
 
+/* --- Layers tab --- */
+.layer-settings {
+  padding: 0 var(--space-sm) var(--space-sm);
+}
+
+.layer-settings .flight-panel .layer-section {
+  margin-bottom: var(--space-sm);
+}
+
+.option-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-xs);
+}
+
+.option-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.option-row .chip-row {
+  padding: 0;
+}
+
+.chip-swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.feed-dot.inline {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.feed-dot.idle {
+  background: var(--color-text-muted);
+}
+
+/* --- Info card (picked layer item) --- */
+.info-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.info-icon {
+  font-size: 16px;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.info-badge {
+  padding: 2px 8px;
+  font: 600 10px var(--font-mono);
+  border: 1px solid;
+  border-radius: 999px;
+}
+
+.info-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px var(--space-md);
+  font-size: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.info-rows dt {
+  color: var(--color-text-muted);
+}
+
+.info-rows dd {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  text-align: right;
+  word-break: break-word;
+}
+
+.flight-actions a.chip {
+  text-decoration: none;
+}
+
+.flight-actions {
+  flex-wrap: wrap;
+}
+
 /* --- Flights tab --- */
 .flight-search {
   display: flex;
