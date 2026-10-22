@@ -1,23 +1,11 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import {
-  Viewer,
-  SceneMode,
-  SkyBox,
-  SkyAtmosphere,
-  Globe as CesiumGlobe,
-  Color,
-  Cartesian3,
-  ScreenSpaceEventHandler,
-  ScreenSpaceEventType,
-  defined,
-  ImageryLayer,
-  Math as CesiumMath,
-  EllipsoidTerrainProvider,
-  Ion,
-} from 'cesium';
+import React, { useRef, useEffect } from 'react';
+import { Viewer, SceneMode, Color, Cartesian3 } from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
 import { IMAGERY_LAYERS, OVERLAY_LAYERS, TERRAIN_OPTIONS } from '../layers';
+
+/** Resolve a provider factory result that may or may not be a Promise. */
+const resolveProvider = (result) => Promise.resolve(result);
 
 /**
  * Core Globe component — creates and manages the CesiumJS Viewer.
@@ -26,6 +14,7 @@ import { IMAGERY_LAYERS, OVERLAY_LAYERS, TERRAIN_OPTIONS } from '../layers';
 export default function Globe({
   activeImageryId,
   activeOverlays,
+  overlayOpacity,
   activeTerrainId,
   terrainExaggeration,
   onViewerReady,
@@ -33,14 +22,18 @@ export default function Globe({
 }) {
   const containerRef = useRef(null);
   const viewerRef = useRef(null);
+  const baseLayerRef = useRef(null);
+  const baseRequestRef = useRef(0);
   const overlayLayersRef = useRef({});
+  const overlayOpacityRef = useRef(overlayOpacity);
 
   // ── Initialize Viewer ──────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
 
-    // Suppress default Ion token warning — we use free sources
-    Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+    // Credits are rendered into the status bar (attribution is required by OSM/Esri/NASA)
+    const creditContainer = document.createElement('div');
+    creditContainer.className = 'worldy-credits';
 
     const viewer = new Viewer(containerRef.current, {
       // Disable all default UI widgets — we have our own
@@ -55,7 +48,7 @@ export default function Globe({
       navigationHelpButton: false,
       infoBox: false,
       selectionIndicator: false,
-      creditContainer: document.createElement('div'), // hide credits container
+      creditContainer,
 
       // Scene settings
       sceneMode: SceneMode.SCENE3D,
@@ -63,7 +56,6 @@ export default function Globe({
 
       // Performance
       requestRenderMode: false,
-      maximumRenderTimeChange: Infinity,
       targetFrameRate: 60,
       msaaSamples: 4,
 
@@ -90,11 +82,6 @@ export default function Globe({
 
     // Level of detail
     globe.maximumScreenSpaceError = 1.5; // Lower = sharper, higher = faster
-
-    // Atmosphere
-    scene.skyAtmosphere.brightnessShift = 0.0;
-    scene.skyAtmosphere.hueShift = 0.0;
-    scene.skyAtmosphere.saturationShift = 0.0;
 
     // Globe base color (oceans when no tiles loaded)
     globe.baseColor = Color.fromCssColorString('#0a1628');
@@ -126,13 +113,12 @@ export default function Globe({
     scene.screenSpaceCameraController.inertiaZoom = 0.8;
 
     // Initial camera position — nice overview
-    viewer.camera.flyTo({
+    viewer.camera.setView({
       destination: Cartesian3.fromDegrees(30, 20, 20000000),
-      duration: 0,
     });
 
     viewerRef.current = viewer;
-    onViewerReady(viewer);
+    onViewerReady(viewer, creditContainer);
 
     // Signal loaded after tiles start rendering
     const removeListener = globe.tileLoadProgressEvent.addEventListener((remaining) => {
@@ -162,34 +148,17 @@ export default function Globe({
     const layerDef = IMAGERY_LAYERS.find((l) => l.id === activeImageryId);
     if (!layerDef) return;
 
-    const layers = viewer.imageryLayers;
+    // Ignore late-resolving providers if the user has switched again meanwhile
+    const requestId = ++baseRequestRef.current;
 
-    // Remove existing base layer (index 0)
-    if (layers.length > 0) {
-      // Find and remove the base layer (lowest layer that isn't an overlay)
-      const overlayIds = new Set(Object.keys(overlayLayersRef.current));
-      for (let i = layers.length - 1; i >= 0; i--) {
-        const layer = layers.get(i);
-        if (!layer._worldyOverlayId) {
-          layers.remove(layer);
-          break;
-        }
-      }
-    }
-
-    // Add new base layer
-    const providerResult = layerDef.createProvider();
-
-    if (providerResult instanceof Promise || (providerResult && typeof providerResult.then === 'function')) {
-      providerResult.then((provider) => {
-        if (viewer.isDestroyed()) return;
-        const newLayer = layers.addImageryProvider(provider, 0);
-        newLayer._worldyBaseLayer = true;
-      });
-    } else {
-      const newLayer = layers.addImageryProvider(providerResult, 0);
-      newLayer._worldyBaseLayer = true;
-    }
+    resolveProvider(layerDef.createProvider())
+      .then((provider) => {
+        if (viewer.isDestroyed() || requestId !== baseRequestRef.current) return;
+        const layers = viewer.imageryLayers;
+        if (baseLayerRef.current) layers.remove(baseLayerRef.current);
+        baseLayerRef.current = layers.addImageryProvider(provider, 0);
+      })
+      .catch((err) => console.warn(`Imagery "${layerDef.id}" failed:`, err));
   }, [activeImageryId]);
 
   // ── Manage Overlays ────────────────────────────────────
@@ -198,43 +167,47 @@ export default function Globe({
     if (!viewer || viewer.isDestroyed()) return;
 
     const layers = viewer.imageryLayers;
+    const current = overlayLayersRef.current;
 
     // Remove overlays that are no longer active
-    for (const [overlayId, cesiumLayer] of Object.entries(overlayLayersRef.current)) {
+    for (const [overlayId, cesiumLayer] of Object.entries(current)) {
       if (!activeOverlays.includes(overlayId)) {
-        layers.remove(cesiumLayer);
-        delete overlayLayersRef.current[overlayId];
+        if (cesiumLayer !== 'pending') layers.remove(cesiumLayer);
+        delete current[overlayId];
       }
     }
 
     // Add new overlays
     for (const overlayId of activeOverlays) {
-      if (overlayLayersRef.current[overlayId]) continue; // already added
+      if (current[overlayId]) continue; // already added or loading
 
       const overlayDef = OVERLAY_LAYERS.find((o) => o.id === overlayId);
       if (!overlayDef) continue;
 
-      const addOverlayLayer = (provider) => {
-        if (viewer.isDestroyed()) return;
-        const newLayer = layers.addImageryProvider(provider);
-        newLayer._worldyOverlayId = overlayId;
-        // Transparent tile overlays (hasAlphaChannel) should be fully opaque —
-        // their transparency comes from the PNG alpha channel itself.
-        // Non-transparent overlays get reduced alpha for blending.
-        newLayer.alpha = 1.0;
-        // Ensure overlay is always on top of the stack
-        layers.raiseToTop(newLayer);
-        overlayLayersRef.current[overlayId] = newLayer;
-      };
-
-      const providerResult = overlayDef.createProvider();
-      if (providerResult instanceof Promise || (providerResult && typeof providerResult.then === 'function')) {
-        providerResult.then(addOverlayLayer);
-      } else {
-        addOverlayLayer(providerResult);
-      }
+      current[overlayId] = 'pending';
+      resolveProvider(overlayDef.createProvider())
+        .then((provider) => {
+          // Skip if destroyed or toggled off while loading
+          if (viewer.isDestroyed() || current[overlayId] !== 'pending') return;
+          const newLayer = layers.addImageryProvider(provider);
+          newLayer.alpha = overlayOpacityRef.current[overlayId] ?? 1.0;
+          layers.raiseToTop(newLayer);
+          current[overlayId] = newLayer;
+        })
+        .catch((err) => {
+          console.warn(`Overlay "${overlayId}" failed:`, err);
+          delete current[overlayId];
+        });
     }
   }, [activeOverlays]);
+
+  // ── Overlay Opacity ────────────────────────────────────
+  useEffect(() => {
+    overlayOpacityRef.current = overlayOpacity;
+    for (const [overlayId, cesiumLayer] of Object.entries(overlayLayersRef.current)) {
+      if (cesiumLayer !== 'pending') cesiumLayer.alpha = overlayOpacity[overlayId] ?? 1.0;
+    }
+  }, [overlayOpacity]);
 
   // ── Switch Terrain ─────────────────────────────────────
   useEffect(() => {
@@ -244,16 +217,12 @@ export default function Globe({
     const terrainDef = TERRAIN_OPTIONS.find((t) => t.id === activeTerrainId);
     if (!terrainDef) return;
 
-    const providerResult = terrainDef.createProvider();
-
-    if (providerResult instanceof Promise || (providerResult && typeof providerResult.then === 'function')) {
-      providerResult.then((provider) => {
+    resolveProvider(terrainDef.createProvider())
+      .then((provider) => {
         if (viewer.isDestroyed()) return;
         viewer.terrainProvider = provider;
-      });
-    } else {
-      viewer.terrainProvider = providerResult;
-    }
+      })
+      .catch((err) => console.warn(`Terrain "${terrainDef.id}" failed:`, err));
   }, [activeTerrainId]);
 
   // ── Terrain Exaggeration ───────────────────────────────

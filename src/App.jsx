@@ -1,29 +1,39 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import Globe from './components/Globe';
 import LayerPanel from './components/LayerPanel';
 import StatusBar from './components/StatusBar';
 import NavControls from './components/NavControls';
 import SearchBar from './components/SearchBar';
+import FlightPanel from './components/FlightPanel';
+import FlightInfoCard from './components/FlightInfoCard';
+import useFlights from './flights/useFlights';
 
 /**
  * Worldy — Main application shell.
- * Orchestrates the globe, layer panel, status bar, and nav controls.
+ *
+ * Layout: top bar (brand + search) · right side panel (Map / Overlays / Flights)
+ * · flight card bottom-left · nav controls bottom-right · status bar along the bottom.
  */
 export default function App() {
   // Globe state
   const [viewer, setViewer] = useState(null);
+  const [creditContainer, setCreditContainer] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showLoading, setShowLoading] = useState(true);
 
   // Layer state
   const [activeImageryId, setActiveImageryId] = useState('esri-satellite');
   const [activeOverlays, setActiveOverlays] = useState([]);
+  const [overlayOpacity, setOverlayOpacity] = useState({});
   const [activeTerrainId, setActiveTerrainId] = useState('ellipsoid');
   const [terrainExaggeration, setTerrainExaggeration] = useState(1);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
 
-  const handleViewerReady = useCallback((v) => {
+  const flights = useFlights(viewer);
+
+  const handleViewerReady = useCallback((v, credits) => {
     setViewer(v);
+    setCreditContainer(credits);
   }, []);
 
   const handleLoaded = useCallback(() => {
@@ -40,46 +50,88 @@ export default function App() {
     );
   }, []);
 
+  const handleOverlayOpacity = useCallback((overlayId, value) => {
+    setOverlayOpacity((prev) => ({ ...prev, [overlayId]: value }));
+  }, []);
+
+  // Keyboard shortcuts: L panel · Esc close flight · H home · N north · +/- zoom · / search
+  const { select } = flights;
+  useEffect(() => {
+    const click = (id) => document.getElementById(id)?.click();
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea')) return;
+      const actions = {
+        Escape: () => select(null),
+        l: () => setIsPanelOpen((p) => !p),
+        h: () => click('btn-home'),
+        n: () => click('btn-north'),
+        '+': () => click('btn-zoom-in'),
+        '=': () => click('btn-zoom-in'),
+        '-': () => click('btn-zoom-out'),
+        '/': () => document.getElementById('search-input')?.focus(),
+      };
+      const action = actions[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+      if (action) {
+        e.preventDefault();
+        action();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [select]);
+
   return (
-    <div className="app-shell" id="app-shell">
+    <div className={`app-shell ${flights.selectedId ? 'has-flight' : ''}`} id="app-shell">
       {/* 3D Globe */}
       <Globe
         activeImageryId={activeImageryId}
         activeOverlays={activeOverlays}
+        overlayOpacity={overlayOpacity}
         activeTerrainId={activeTerrainId}
         terrainExaggeration={terrainExaggeration}
         onViewerReady={handleViewerReady}
         onLoaded={handleLoaded}
       />
 
-      {/* Brand */}
-      <div className="brand-mark glass-panel" id="brand-mark">
-        <span className="brand-name">Worldy</span>
-        <span className="brand-version">v1.0</span>
-      </div>
+      {/* Top bar: brand + search */}
+      <header className="top-bar">
+        <div className="brand-mark glass-panel" id="brand-mark">
+          <span className="brand-name">Worldy</span>
+          <span className="brand-version">v1.1</span>
+        </div>
+        <SearchBar viewer={viewer} />
+      </header>
 
-      {/* Search Bar */}
-      <SearchBar viewer={viewer} />
-
-      {/* Layer Switcher */}
+      {/* Side panel */}
       <LayerPanel
         activeImageryId={activeImageryId}
         onImageryChange={setActiveImageryId}
         activeOverlays={activeOverlays}
         onOverlayToggle={handleOverlayToggle}
+        overlayOpacity={overlayOpacity}
+        onOverlayOpacityChange={handleOverlayOpacity}
         activeTerrainId={activeTerrainId}
         onTerrainChange={setActiveTerrainId}
         terrainExaggeration={terrainExaggeration}
         onTerrainExaggerationChange={setTerrainExaggeration}
+        flightsTab={<FlightPanel flights={flights} />}
         isOpen={isPanelOpen}
         onToggle={() => setIsPanelOpen((p) => !p)}
       />
+
+      {/* Selected flight */}
+      <FlightInfoCard flights={flights} />
 
       {/* Navigation Controls */}
       <NavControls viewer={viewer} />
 
       {/* Status Bar */}
-      <StatusBar viewer={viewer} />
+      <StatusBar
+        viewer={viewer}
+        creditContainer={creditContainer}
+        flightCount={flights.enabled ? flights.stats.shown : null}
+        simulated={flights.forecastMin > 0}
+      />
 
       {/* Loading Overlay */}
       {showLoading && (

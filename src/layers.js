@@ -10,13 +10,10 @@ import {
   WebMapServiceImageryProvider,
   WebMapTileServiceImageryProvider,
   ArcGisMapServerImageryProvider,
-  IonImageryProvider,
-  CesiumTerrainProvider,
+  ArcGISTiledElevationTerrainProvider,
   EllipsoidTerrainProvider,
-  Ion,
   Credit,
   GeographicTilingScheme,
-  WebMercatorTilingScheme,
 } from 'cesium';
 
 // ── Imagery Layer Definitions ────────────────────────────────────
@@ -167,18 +164,6 @@ export const IMAGERY_LAYERS = [
       ),
   },
   {
-    id: 'stamen-terrain',
-    name: 'Stadia Terrain',
-    description: 'Stadia Stamen terrain labels',
-    icon: '🏔️',
-    category: 'map',
-    createProvider: () =>
-      new UrlTemplateImageryProvider({
-        url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.png',
-        credit: 'Stadia Maps / Stamen Design',
-      }),
-  },
-  {
     id: 'carto-dark',
     name: 'Dark Matter',
     description: 'CARTO dark basemap',
@@ -278,34 +263,6 @@ export const OVERLAY_LAYERS = [
       ),
   },
   {
-    id: 'stamen-lines',
-    name: 'Roads & Transit',
-    description: 'Stamen toner road network',
-    icon: '🛤️',
-    defaultEnabled: false,
-    createProvider: () =>
-      new UrlTemplateImageryProvider({
-        url: 'https://tiles.stadiamaps.com/tiles/stamen_toner_lines/{z}/{x}/{y}.png',
-        credit: 'Stadia Maps / Stamen Design',
-        maximumLevel: 18,
-        hasAlphaChannel: true,
-      }),
-  },
-  {
-    id: 'owm-clouds',
-    name: 'Cloud Cover',
-    description: 'OpenWeatherMap cloud overlay',
-    icon: '☁️',
-    defaultEnabled: false,
-    createProvider: () =>
-      new UrlTemplateImageryProvider({
-        url: 'https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=b1b15e88fa797225412429c1c50c122a1',
-        credit: 'OpenWeatherMap',
-        maximumLevel: 18,
-        hasAlphaChannel: true,
-      }),
-  },
-  {
     id: 'opnv-transport',
     name: 'Public Transport',
     description: 'Bus/tram/rail network overlay',
@@ -332,15 +289,14 @@ export const TERRAIN_OPTIONS = [
     createProvider: () => new EllipsoidTerrainProvider(),
   },
   {
-    id: 'cesium-world',
+    id: 'esri-world',
     name: 'World Terrain',
-    description: 'Cesium Ion world terrain',
+    description: 'Esri World Elevation 3D',
     icon: '🏔️',
     createProvider: () =>
-      CesiumTerrainProvider.fromIonAssetId(1, {
-        requestVertexNormals: true,
-        requestWaterMask: true,
-      }),
+      ArcGISTiledElevationTerrainProvider.fromUrl(
+        'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'
+      ),
   },
 ];
 
@@ -349,7 +305,7 @@ export const TERRAIN_OPTIONS = [
 export const CATEGORIES = {
   satellite: { label: 'Satellite Imagery', icon: '🛰️' },
   map: { label: 'Map Tiles', icon: '🗺️' },
-  special: { label: 'Special', icon: '✨' },
+  special: { label: 'Night', icon: '✨' },
 };
 
 export function getLayersByCategory() {

@@ -1,9 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  Cartesian3,
-  Math as CesiumMath,
-  HeadingPitchRange,
-} from 'cesium';
+import { Cartesian3, Math as CesiumMath } from 'cesium';
 
 /**
  * SearchBar — geocode cities/places using Nominatim (free, no API key)
@@ -46,12 +42,7 @@ export default function SearchBar({ viewer }) {
       try {
         const encoded = encodeURIComponent(q.trim());
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=8&addressdetails=1&accept-language=en`,
-          {
-            headers: {
-              'User-Agent': 'Worldy/1.0',
-            },
-          }
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encoded}&limit=8&addressdetails=1&accept-language=en`
         );
         const data = await res.json();
 
@@ -191,7 +182,7 @@ export default function SearchBar({ viewer }) {
           id="search-input"
           type="text"
           className="search-input"
-          placeholder="Search cities, places, landmarks…"
+          placeholder="Search places…  ( / )"
           value={query}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
