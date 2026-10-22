@@ -17,6 +17,7 @@ import { boundsOf } from './tools/grid';
 import { Rectangle } from 'cesium';
 import { readHash, applyHashView, syncHash } from './urlState';
 import { loadPerfMode, savePerfMode } from './perf';
+import { loadBareEarth, saveBareEarth } from './terrain/geoid';
 import { flyToSafe } from './camera';
 import useFlights from './flights/useFlights';
 import useDataLayers from './datalayers/useDataLayers';
@@ -43,6 +44,12 @@ export default function App() {
   const [terrainExaggeration, setTerrainExaggeration] = useState(1);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [perfMode, setPerfMode] = useState(loadPerfMode);
+  const [bareEarth, setBareEarth] = useState(loadBareEarth);
+
+  const handleBareEarth = useCallback((on) => {
+    setBareEarth(on);
+    saveBareEarth(on);
+  }, []);
 
   const handlePerfMode = useCallback((mode) => {
     setPerfMode(mode);
@@ -155,6 +162,7 @@ export default function App() {
         overlayOpacity={overlayOpacity}
         activeTerrainId={activeTerrainId}
         terrainExaggeration={terrainExaggeration}
+        bareEarth={bareEarth}
         perfMode={perfMode}
         onViewerReady={handleViewerReady}
         onLoaded={handleLoaded}
@@ -199,7 +207,7 @@ export default function App() {
             ),
           },
           { id: 'tools', label: 'Tools', badge: tools.shapes.length, content: <ToolsPanel tools={tools} onFocus={focusShape} /> },
-          { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} /> },
+          { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} bareEarth={bareEarth} onBareEarthChange={handleBareEarth} /> },
         ]}
         isOpen={isPanelOpen}
         onToggle={() => setIsPanelOpen((p) => !p)}

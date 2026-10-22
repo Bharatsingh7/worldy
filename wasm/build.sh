@@ -11,5 +11,5 @@ clang --target=wasm32 -O3 -nostdlib -ffreestanding -fno-builtin-memset \
   -Wall -Wextra -Wno-unused-parameter \
   -Wl,--no-entry -Wl,--import-undefined -Wl,--strip-all -Wl,--initial-memory=1048576 \
   -o ../public/wasm/worldy.wasm \
-  memory.c geo.c sgp4.c terrain.c landslide.c tsunami.c flood.c
+  memory.c geo.c sgp4.c terrain.c landslide.c tsunami.c flood.c terrain/geoid.c terrain/clean.c
 echo "built public/wasm/worldy.wasm ($(wc -c < ../public/wasm/worldy.wasm) bytes)"

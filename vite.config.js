@@ -38,5 +38,7 @@ export default defineConfig(({ mode }) => {
     build: {
       chunkSizeWarningLimit: 4000,
     },
+    // The terrain worker imports Cesium's LERC decoder directly
+    optimizeDeps: { include: ['lerc'] },
   };
 });

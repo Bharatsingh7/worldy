@@ -10,11 +10,14 @@ import {
   WebMapServiceImageryProvider,
   WebMapTileServiceImageryProvider,
   ArcGisMapServerImageryProvider,
-  ArcGISTiledElevationTerrainProvider,
   EllipsoidTerrainProvider,
   Credit,
   GeographicTilingScheme,
 } from 'cesium';
+
+import CleanTerrainProvider from './terrain/CleanTerrainProvider';
+
+export const ESRI_ELEVATION = 'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer';
 
 // ── Imagery Layer Definitions ────────────────────────────────────
 
@@ -291,12 +294,9 @@ export const TERRAIN_OPTIONS = [
   {
     id: 'esri-world',
     name: 'World Terrain',
-    description: 'Esri World Elevation 3D',
+    description: 'Esri World Elevation 3D, geoid-corrected',
     icon: '🏔️',
-    createProvider: () =>
-      ArcGISTiledElevationTerrainProvider.fromUrl(
-        'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'
-      ),
+    createProvider: ({ bareEarth = true } = {}) => CleanTerrainProvider.fromUrl(ESRI_ELEVATION, { bareEarth }),
   },
 ];
 

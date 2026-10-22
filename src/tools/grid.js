@@ -12,6 +12,7 @@ import {
   sampleTerrain,
 } from 'cesium';
 import { TERRAIN_OPTIONS } from '../layers';
+import { geoidN, loadGeoid, loadBareEarth } from '../terrain/geoid';
 
 const R = 6371008.8;
 const RAD = Math.PI / 180;
@@ -44,29 +45,62 @@ export function gridSpec([w, s, e, n], maxCells = 128) {
   return { width, height, dx: widthM / width, dy: heightM / height, widthM, heightM };
 }
 
-let elevationProvider = null;
+const elevationProviders = new Map();
 
-/** Keyless Esri World Elevation provider (shared; used even when 3D terrain is off). */
+/** Corrected Esri elevation provider (shared; used even when 3D terrain is off). */
 export function getElevationProvider() {
-  elevationProvider ||= Promise.resolve(TERRAIN_OPTIONS.find((t) => t.id === 'esri-world').createProvider());
-  return elevationProvider;
+  const bareEarth = loadBareEarth();
+  if (!elevationProviders.has(bareEarth)) {
+    elevationProviders.set(bareEarth, Promise.resolve(TERRAIN_OPTIONS.find((t) => t.id === 'esri-world').createProvider({ bareEarth })));
+  }
+  return elevationProviders.get(bareEarth);
+}
+
+/**
+ * Sample heights above sea level for cartographics at a target tile level:
+ * failed samples fall back to coarser levels, and the geoid is removed
+ * (provider heights are ellipsoidal).
+ */
+async function sampleMSL(cartos, wantedLevel) {
+  const provider = await getElevationProvider();
+  await loadGeoid();
+  // Tile availability is loaded lazily (it reports level 0 until then), so don't trust it here:
+  // start at the wanted level (Esri has ≈16 levels) and fall back if tiles are missing.
+  let level = Math.max(0, Math.min(wantedLevel, 16));
+  const heights = new Float64Array(cartos.length).fill(NaN);
+  for (let attempt = 0; attempt < 4 && level >= 0; attempt++, level -= 2) {
+    const todo = [];
+    heights.forEach((h, i) => Number.isNaN(h) && todo.push(i));
+    if (!todo.length) break;
+    try {
+      const res = await sampleTerrain(provider, level, todo.map((i) => Cartographic.clone(cartos[i])));
+      res.forEach((c, k) => {
+        if (Number.isFinite(c.height)) heights[todo[k]] = c.height;
+      });
+    } catch {
+      // try a coarser level
+    }
+  }
+  const valid = [...heights].filter(Number.isFinite);
+  const fallback = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
+  return heights.map((h, i) => {
+    const c = cartos[i];
+    const n = geoidN((c.latitude * 180) / Math.PI, (c.longitude * 180) / Math.PI);
+    return (Number.isFinite(h) ? h : fallback) - n;
+  });
 }
 
 /** Sample ground heights on a width×height grid over bounds. */
 export async function sampleHeights(bounds, width, height, cellM) {
   const [w, s, e, n] = bounds;
-  const provider = await getElevationProvider();
-  // Pick the tile level whose resolution (≈156 km / 2^L per pixel at 256 px) matches the cell size
-  const level = Math.max(0, Math.min(14, Math.round(Math.log2(156543 / Math.max(cellM, 1)))));
+  // Tile level whose resolution (≈156 km / 2^L per pixel at 256 px) matches the cell size
+  const level = Math.max(0, Math.round(Math.log2(156543 / Math.max(cellM, 1))));
   const cartos = [];
   for (let y = 0; y < height; y++) {
     const lat = n - ((y + 0.5) * (n - s)) / height;
     for (let x = 0; x < width; x++) cartos.push(Cartographic.fromDegrees(w + ((x + 0.5) * (e - w)) / width, lat));
   }
-  const res = await sampleTerrain(provider, level, cartos);
-  const out = new Float32Array(width * height);
-  for (let i = 0; i < res.length; i++) out[i] = Number.isFinite(res[i].height) ? res[i].height : 0;
-  return out;
+  return Float32Array.from(await sampleMSL(cartos, level));
 }
 
 /** Heights along a path (list of [lon, lat]), `count` evenly spaced samples. */
@@ -89,10 +123,8 @@ export async function sampleProfile(points, count = 120) {
     cartos.push(Cartographic.fromDegrees(seg.a[0] + (seg.b[0] - seg.a[0]) * f, seg.a[1] + (seg.b[1] - seg.a[1]) * f));
     dist.push(t);
   }
-  const provider = await getElevationProvider();
-  const level = Math.max(0, Math.min(14, Math.round(Math.log2(156543 / Math.max(total / count, 1)))));
-  const res = await sampleTerrain(provider, level, cartos);
-  return { dist, heights: res.map((c) => (Number.isFinite(c.height) ? c.height : 0)), total };
+  const level = Math.max(0, Math.round(Math.log2(156543 / Math.max(total / count, 1))));
+  return { dist, heights: [...(await sampleMSL(cartos, level))], total };
 }
 
 export function haversine(lat1, lon1, lat2, lon2) {

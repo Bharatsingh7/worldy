@@ -19,6 +19,7 @@ export default function Globe({
   overlayOpacity,
   activeTerrainId,
   terrainExaggeration,
+  bareEarth,
   perfMode,
   onViewerReady,
   onLoaded,
@@ -214,14 +215,14 @@ export default function Globe({
     const terrainDef = TERRAIN_OPTIONS.find((t) => t.id === activeTerrainId);
     if (!terrainDef) return;
 
-    resolveProvider(terrainDef.createProvider())
+    resolveProvider(terrainDef.createProvider({ bareEarth }))
       .then((provider) => {
         if (viewer.isDestroyed()) return;
         viewer.terrainProvider = provider;
         viewer.scene.requestRender();
       })
       .catch((err) => console.warn(`Terrain "${terrainDef.id}" failed:`, err));
-  }, [activeTerrainId]);
+  }, [activeTerrainId, bareEarth]);
 
   // ── Terrain Exaggeration ───────────────────────────────
   useEffect(() => {
