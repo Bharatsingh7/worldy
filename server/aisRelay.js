@@ -101,7 +101,12 @@ export default function aisRelay(apiKey) {
 
   return {
     name: 'worldy-ais-relay',
-    configureServer: (server) => server.middlewares.use(middleware),
-    configurePreviewServer: (server) => server.middlewares.use(middleware),
+    // Block bodies: a returned function would be treated by Vite as a post-middleware hook
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
   };
 }
