@@ -25,17 +25,20 @@
 * 📑 **Independent Stackable Overlays**: High-zoom vector place labels (CARTO dark labels), administrative international & state boundaries (Esri), and public transit networks (MeMoMaps), each with its own opacity slider.
 * 🏔️ **3D Terrain & Elevation**: Keyless global terrain (Esri World Elevation 3D) with customizable vertical height exaggeration (1× to 10×) and depth testing against terrain geometry.
 * ✈️ **Live Flight Tracking**: ~10–15k aircraft worldwide (OpenSky + adsb.lol), military-flagged aircraft, origin → destination routes, past track, ETA, follow camera, and a forecast simulator that projects every plane up to 2 hours ahead.
-* ⚡ **Ultra-Smooth 60 FPS Engine**: Built on CesiumJS WebGL rendering with logarithmic depth buffers (no z-fighting), horizon culling, tile preloading (siblings & ancestors), and fine-tuned camera inertia.
+* 🧭 **Layer system**: switch on ships (AIS, incl. military), satellites (incl. publicly catalogued military), nuclear power plants, military bases, mapped bunkers, earthquakes, wildfires/storms/volcanoes, rain radar and day/night. Layers that are off cost nothing.
+* 📐 **Draw, measure & analyse**: mark points, lines, areas, boxes and circles with the mouse. Get area/length with real-world comparisons, terrain elevation of just that area, nearby features, a base map applied only there, what's visible from a point, and which satellites are overhead.
+* 🌊 **What-if simulations**: landslide runout, flood / sea-level rise and tsunami (earthquake → ocean travel time → coastal flooding), computed with simplified physical models in C.
+* ⚙️ **Light on the GPU**: renders on demand, not 60 fps nonstop. Eco / Balanced / Quality modes; heavy maths runs in C compiled to WebAssembly in a Web Worker.
 * 💎 **Cyber-Glass HUD**: Translucent dark glassmorphism interface with real-time camera telemetry (Latitude, Longitude, Altitude), live FPS monitor, and responsive touch/mouse navigation.
-* 🆓 **100% Free & Open Services**: Preconfigured with free public tile endpoints — zero credit cards or paid API keys required.
+* 🆓 **Free & open services**: no paid keys. One optional free key (aisstream.io) unlocks worldwide ships.
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-* [Node.js](https://nodejs.org/) (v18.0.0 or higher recommended)
-* `npm` or `pnpm` / `yarn`
+* [Node.js](https://nodejs.org/) 22+ (the ship relay uses Node's built-in WebSocket)
+* `clang` with the wasm32 target, to rebuild the C core (optional: a prebuilt `public/wasm/worldy.wasm` is committed)
 
 ### Installation
 
@@ -52,6 +55,8 @@ npm run dev
 ```
 
 Navigate to **`http://localhost:3000`** in your browser.
+
+**Optional: worldwide ships.** Get a free key at [aisstream.io](https://aisstream.io) (sign in with GitHub), then `cp .env.example .env` and paste it as `AISSTREAM_KEY`. Restart `npm run dev`. The key stays on the local dev/preview server; without it, ships are shown for the Baltic Sea only.
 
 ### Production Build
 
@@ -120,6 +125,64 @@ Open the **Flights** tab in the side panel.
 
 ---
 
+## 🧭 Data Layers (Layers tab)
+
+| Layer | Source | Notes |
+| :--- | :--- | :--- |
+| Ships (AIS) | [Digitraffic](https://www.digitraffic.fi/en/marine-traffic/) (Baltic, keyless) · [aisstream.io](https://aisstream.io) (worldwide, free key) | Filter: military & law enforcement (AIS types 35/55), cargo/tankers, passenger |
+| Satellites | [CelesTrak](https://celestrak.org) groups | Stations, military, Earth imaging, GNSS, weather, GEO, Starlink. Cached 2 h. Click for ground track, coverage circle, "now over", passes |
+| Nuclear power plants | [GeoNuclearData](https://github.com/cristianst85/GeoNuclearData) (WNA/IAEA) | Operating / building / shut down |
+| Military bases & airfields | OpenStreetMap (Overpass) | Loads by area when zoomed in below ~800 km |
+| Mapped bunkers | OpenStreetMap `military=bunker` | Publicly mapped only, mostly historic |
+| Earthquakes | [USGS](https://earthquake.usgs.gov/earthquakes/feed/) | 24 h / 7 days, M2.5+ / M4.5+ |
+| Natural events | [NASA EONET](https://eonet.gsfc.nasa.gov/) | Wildfires, storms, volcanoes, ice |
+| Rain radar | [RainViewer](https://www.rainviewer.com/api.html) | Latest frame |
+| Day / night | computed | Terminator and sub-solar point |
+
+**What public data can't show:** aircraft and ships with transponders off (including most warships and stealth flights), classified satellites, and hidden or classified facilities. Only what is publicly broadcast or mapped appears.
+
+---
+
+## 📐 Tools & Simulations (Tools tab)
+
+Draw a **point, line, area, box or circle**, then:
+
+* **Size & comparison**: geodesic area, perimeter or length, e.g. "≈ 2.4 × Manhattan".
+* **Elevation here**: terrain sampled over the shape, with min/max/mean and slope, plus a hillshaded colour map draped only inside it. Lines get an elevation profile with climb and descent.
+* **Nearby features**: settlements, hospitals, schools, airports, power plants, water, military sites and attractions inside the shape (OpenStreetMap).
+* **Apply a map to this area only**: any base map, clipped to the shape's bounding box.
+* **What can I see from here** (point): viewshed within 5 km, including Earth curvature.
+* **Satellites overhead now** (point): satellites from the enabled groups above 10°.
+
+**Simulations** (areas):
+
+| Simulation | Model |
+| :--- | :--- |
+| Landslide | Volume = area × depth → reach angle from Scheidegger (1973); multiple-flow-direction routing along an energy line; deposits relax to a 12° angle of repose |
+| Flood / sea-level rise | Connected "bathtub" fill from the sea, or from the area's lowest point if it has no sea |
+| Tsunami | Mw → rupture size (Strasser 2010) and slip → initial wave; travel time at √(g·depth) over NOAA ETOPO bathymetry; Green's-law shoaling; run-up ≈ 2 × near-shore wave; inland reach from Hills & Mader (1997) |
+
+Each result lists affected settlements and spells out its assumptions. These are screening estimates, not certified hazard models.
+
+---
+
+## ⚙️ Performance & the C core
+
+* The globe **renders only when something changes**. Planes, ships and satellites update a few times a second on a shared ticker instead of every frame, and nothing animates in a hidden tab.
+* **Settings → Performance** sets the GPU cost: *Eco* (75% resolution, no anti-aliasing, coarse tiles, 30 fps cap), *Balanced* (default) or *Quality* (full DPI, 4× MSAA).
+* GPU load comes from rendering, so these settings are what lower it. The CPU-heavy maths is plain C in [`wasm/`](wasm/), compiled to WebAssembly with `clang` (no Emscripten, no libc), and runs in a Web Worker so the page stays responsive:
+
+| File | Does |
+| :--- | :--- |
+| `geo.c` | Geodesic distance, polygon area/perimeter, polygon masks, batch dead reckoning of aircraft |
+| `sgp4.c` | SGP4 orbit propagation (matches satellite.js for low orbits), ground tracks, pass prediction |
+| `terrain.c` | Elevation statistics, slope, hillshaded colour maps, viewshed |
+| `landslide.c` · `tsunami.c` · `flood.c` | The simulations above |
+
+Rebuild with `npm run build:wasm` (also runs automatically before `dev` and `build`).
+
+---
+
 ## 🔍 Global Search
 
 The floating search bar allows effortless travel across the planet:
@@ -141,7 +204,9 @@ The floating search bar allows effortless travel across the planet:
 | **Zoom buttons** | <kbd>+</kbd> / <kbd>-</kbd> | — |
 | **Focus search** | <kbd>/</kbd> | — |
 | **Toggle side panel** | <kbd>L</kbd> | — |
-| **Close flight card** | <kbd>Esc</kbd> | — |
+| **Close card / cancel drawing** | <kbd>Esc</kbd> | — |
+| **Save screenshot** | Camera button or <kbd>P</kbd> | — |
+| **Share this view** | Copy the URL (camera and base map are kept in it) | — |
 
 ---
 
@@ -150,13 +215,18 @@ The floating search bar allows effortless travel across the planet:
 ```
 worldy/
 ├── index.html                   # HTML entry point with Inter & JetBrains Mono fonts
-├── vite.config.js               # Vite bundler configuration with vite-plugin-cesium
-├── package.json                 # Dependencies & scripts
+├── vite.config.js               # Vite config: Cesium, API proxies, aisstream relay
+├── server/aisRelay.js           # Dev/preview middleware: worldwide AIS from aisstream.io
+├── wasm/                        # C compute core → public/wasm/worldy.wasm (build.sh)
 └── src/
     ├── main.jsx                 # React root mount
     ├── App.jsx                  # Main application layout & global state coordination
     ├── layers.js                # Imagery providers, overlays, and terrain factories
     ├── index.css                # Glassmorphic cyber design system & responsive layout
+    ├── perf.js · ticker.js · camera.js · urlState.js   # performance modes, animation ticker, terrain-safe camera, shareable URL
+    ├── compute/                 # wasm loader, compute worker, promise client
+    ├── datalayers/              # layer registry + ships, satellites, nuclear, OSM sites, quakes, events, radar, day/night
+    ├── tools/                   # drawing, grids/terrain sampling, analyses & simulations
     ├── flights/
     │   ├── api.js               # OpenSky / adsb.lol / adsbdb fetchers, normalised flight shape
     │   ├── predict.js           # Great-circle dead reckoning, route forecast, ETA
@@ -164,8 +234,12 @@ worldy/
     │   └── useFlights.js        # Polling, merging, filters, selection state
     └── components/
         ├── Globe.jsx            # Core CesiumJS viewer, scene tuning, and tile caching
-        ├── LayerPanel.jsx       # Tabbed side panel: Map / Overlays / Flights
-        ├── FlightPanel.jsx      # Flights tab: filters, search, forecast slider, feed status
+        ├── LayerPanel.jsx       # Tabbed side panel: Map / Layers / Tools / Settings
+        ├── DataLayersPanel.jsx  # Layers tab with per-layer options
+        ├── ToolsPanel.jsx       # Draw, analyse, simulate
+        ├── InfoCard.jsx · ResultCard.jsx   # Picked item details · tool results
+        ├── SettingsPanel.jsx    # Performance modes
+        ├── FlightPanel.jsx      # Flight filters, search, forecast slider, feed status
         ├── FlightInfoCard.jsx   # Selected aircraft: route, progress, ETA, live numbers
         ├── SearchBar.jsx        # Nominatim geocoder with keyboard navigation & fly-to
         ├── NavControls.jsx      # Compass (north-up), zoom, home
@@ -195,6 +269,8 @@ Worldy utilizes open data and services provided by:
 * [USGS National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map)
 * [OpenSky Network](https://opensky-network.org/), [adsb.lol](https://adsb.lol/) (ODbL), [adsbdb](https://www.adsbdb.com/)
 * [MeMoMaps](https://memomaps.de/)
+* [Fintraffic Digitraffic](https://www.digitraffic.fi/) (CC BY 4.0), [aisstream.io](https://aisstream.io/)
+* [CelesTrak](https://celestrak.org/), [GeoNuclearData](https://github.com/cristianst85/GeoNuclearData) (ODbL), [USGS](https://www.usgs.gov/), [NASA EONET](https://eonet.gsfc.nasa.gov/), [RainViewer](https://www.rainviewer.com/), [NOAA ETOPO](https://www.ncei.noaa.gov/products/etopo-global-relief-model)
 
 ---
 

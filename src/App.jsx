@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Globe from './components/Globe';
 import LayerPanel from './components/LayerPanel';
 import StatusBar from './components/StatusBar';
@@ -10,6 +10,12 @@ import OverlayList from './components/OverlayList';
 import SettingsPanel from './components/SettingsPanel';
 import DataLayersPanel from './components/DataLayersPanel';
 import InfoCard from './components/InfoCard';
+import ToolsPanel from './components/ToolsPanel';
+import ResultCard from './components/ResultCard';
+import useTools from './tools/useTools';
+import { boundsOf } from './tools/grid';
+import { Rectangle } from 'cesium';
+import { readHash, applyHashView, syncHash } from './urlState';
 import { loadPerfMode, savePerfMode } from './perf';
 import { flyToSafe } from './camera';
 import useFlights from './flights/useFlights';
@@ -30,7 +36,7 @@ export default function App() {
   const [showLoading, setShowLoading] = useState(true);
 
   // Layer state
-  const [activeImageryId, setActiveImageryId] = useState('esri-satellite');
+  const [activeImageryId, setActiveImageryId] = useState(() => readHash()?.map || 'esri-satellite');
   const [activeOverlays, setActiveOverlays] = useState([]);
   const [overlayOpacity, setOverlayOpacity] = useState({});
   const [activeTerrainId, setActiveTerrainId] = useState('ellipsoid');
@@ -43,12 +49,26 @@ export default function App() {
     savePerfMode(mode);
   }, []);
 
+  // Shareable URL: restore the view from #@lat,lon,… and keep it updated
+  const imageryRef = useRef(activeImageryId);
+  useEffect(() => {
+    imageryRef.current = activeImageryId;
+  }, [activeImageryId]);
+  useEffect(() => {
+    if (!viewer) return;
+    const v = readHash();
+    if (v) applyHashView(viewer, v);
+    return syncHash(viewer, () => imageryRef.current);
+  }, [viewer]);
+
   const flights = useFlights(viewer);
   const dataLayers = useDataLayers(viewer);
 
+  const tools = useTools(viewer, { getLayer: dataLayers.get });
+
   // One card at a time: picking a layer item closes the flight card and vice versa
   const { select } = flights;
-  const [picked, setPicked] = usePicking(viewer, { onPick: () => select(null) });
+  const [picked, setPicked] = usePicking(viewer, { onPick: () => select(null), isBusy: tools.isBusy });
   useEffect(() => {
     if (flights.selectedId) setPicked(null);
   }, [flights.selectedId, setPicked]);
@@ -88,12 +108,14 @@ export default function App() {
   }, []);
 
   // Keyboard shortcuts: L panel · Esc close card · H home · N north · +/- zoom · / search
+  const { cancelDraw } = tools;
   useEffect(() => {
     const click = (id) => document.getElementById(id)?.click();
     const onKey = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea')) return;
       const actions = {
         Escape: () => {
+          cancelDraw();
           select(null);
           setPicked(null);
         },
@@ -104,6 +126,7 @@ export default function App() {
         '=': () => click('btn-zoom-in'),
         '-': () => click('btn-zoom-out'),
         '/': () => document.getElementById('search-input')?.focus(),
+        p: () => click('btn-shot'),
       };
       const action = actions[e.key.length === 1 ? e.key.toLowerCase() : e.key];
       if (action) {
@@ -113,10 +136,18 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [select, setPicked]);
+  }, [select, setPicked, cancelDraw]);
+
+  const focusShape = useCallback(
+    (shape) => {
+      const [w, s, e, n] = boundsOf(shape.points, 0.6, 3000);
+      viewer?.camera.flyTo({ destination: Rectangle.fromDegrees(w, s, e, n), duration: 1.5 });
+    },
+    [viewer]
+  );
 
   return (
-    <div className={`app-shell ${flights.selectedId || pickedLayer ? 'has-flight' : ''}`} id="app-shell">
+    <div className={`app-shell ${flights.selectedId || pickedLayer || tools.selected ? 'has-flight' : ''}`} id="app-shell">
       {/* 3D Globe */}
       <Globe
         activeImageryId={activeImageryId}
@@ -167,22 +198,26 @@ export default function App() {
               />
             ),
           },
+          { id: 'tools', label: 'Tools', badge: tools.shapes.length, content: <ToolsPanel tools={tools} onFocus={focusShape} /> },
           { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} /> },
         ]}
         isOpen={isPanelOpen}
         onToggle={() => setIsPanelOpen((p) => !p)}
       />
 
-      {/* Selected flight / picked layer item */}
-      <FlightInfoCard flights={flights} />
-      {pickedLayer && (
-        <InfoCard
-          layer={pickedLayer}
-          itemKey={picked.key}
-          onClose={() => setPicked(null)}
-          onFlyTo={(d) => flyToSafe(viewer, { lon: d.lon, lat: d.lat, range: Math.max((d.altM || 0) * 2, 40_000) })}
-        />
-      )}
+      {/* Cards: selected flight / picked layer item / tool results */}
+      <div className="card-dock">
+        <FlightInfoCard flights={flights} />
+        {pickedLayer && (
+          <InfoCard
+            layer={pickedLayer}
+            itemKey={picked.key}
+            onClose={() => setPicked(null)}
+            onFlyTo={(d) => flyToSafe(viewer, { lon: d.lon, lat: d.lat, range: Math.max((d.altM || 0) * 2, 40_000) })}
+          />
+        )}
+        <ResultCard tools={tools} onFlyTo={(lon, lat) => flyToSafe(viewer, { lon, lat, range: 8000 })} />
+      </div>
 
       {/* Navigation Controls */}
       <NavControls viewer={viewer} />

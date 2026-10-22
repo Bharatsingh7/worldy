@@ -11,7 +11,7 @@
  * 5. Deposits steeper than the angle of repose slump sideways (sandpile relaxation).
  *
  * out deposit: thickness (m) per cell. stats:
- *   [volume m³, H/L, reach angle °, affected area m², max runout m, max deposit m, mass leaving grid m³]
+ *   [volume m³, H/L, reach angle °, affected area m², runout beyond release m, max deposit m, mass leaving grid m³]
  */
 #include "worldy.h"
 
@@ -21,14 +21,12 @@ EXPORT(ls_run) int ls_run(const float *h, int w, int hgt, double dx, double dy, 
   double area = dx * dy;
   double *mass = (double *)walloc((u32)n * 8u);
   double *energy = (double *)walloc((u32)n * 8u);
-  double *path = (double *)walloc((u32)n * 8u);
   u8 *touched = (u8 *)walloc((u32)n);
   double volume = 0;
 
   for (int i = 0; i < n; i++) {
     mass[i] = 0;
     energy[i] = -INF_D;
-    path[i] = 0;
     touched[i] = 0;
     deposit[i] = 0;
     if (release[i]) {
@@ -99,7 +97,6 @@ EXPORT(ls_run) int ls_run(const float *h, int w, int hgt, double dx, double dy, 
       mass[j] += moving * wts[k] / wsum;
       double e = energy[i] - d * hl;
       if (e > energy[j]) energy[j] = e;
-      if (path[i] + d > path[j]) path[j] = path[i] + d;
       touched[j] = 1;
     }
   }
@@ -126,18 +123,29 @@ EXPORT(ls_run) int ls_run(const float *h, int w, int hgt, double dx, double dy, 
         deposit[i] -= (float)give;
         deposit[j] += (float)give;
         touched[j] = 1;
-        if (path[i] + d > path[j]) path[j] = path[i] + d;
         moved = 1;
       }
     }
     if (!moved) break;
   }
 
+  /*
+   * Runout = straight-line reach beyond the release area: farthest affected cell from the
+   * release centroid, minus the release area's equivalent radius.
+   */
+  double cx = 0, cy = 0, rc = 0;
+  for (int i = 0; i < n; i++)
+    if (release[i]) { cx += (i % w) * dx; cy += (i / w) * dy; rc++; }
+  cx /= rc;
+  cy /= rc;
+  double releaseRadius = w_sqrt(rc * area / PI);
   double affected = 0, runout = 0, maxDep = 0;
   for (int i = 0; i < n; i++) {
     if (!touched[i] && deposit[i] <= 0) continue;
     affected += area;
-    if (path[i] > runout) runout = path[i];
+    double ex = (i % w) * dx - cx, ey = (i / w) * dy - cy;
+    double reach = w_sqrt(ex * ex + ey * ey) - releaseRadius;
+    if (reach > runout) runout = reach;
     if (deposit[i] > maxDep) maxDep = deposit[i];
   }
   stats[0] = volume;

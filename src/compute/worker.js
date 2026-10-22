@@ -177,7 +177,11 @@ const ops = {
       const [area, inland, maxDepth, xmax] = w.get(F64, st, 4);
       const rgba = w.reserve(U8, n * 4);
       w.x.ras_colorize(dep, n, 0, Math.max(1, maxDepth), 2, rgba);
-      return { stats: { area, inland, maxDepth, xmax, seaCells }, rgba: w.get(Uint8ClampedArray, rgba, n * 4) };
+      return {
+        stats: { area, inland, maxDepth, xmax, seaCells },
+        depth: w.get(F32, dep, n),
+        rgba: w.get(Uint8ClampedArray, rgba, n * 4),
+      };
     });
   },
   'sim:flood'(w, { heights, width, height, dx, dy, rise, seedX = -1, seedY = -1 }) {
@@ -189,7 +193,7 @@ const ops = {
       const [area, maxDepth, cells] = w.get(F64, st, 3);
       const rgba = w.reserve(U8, n * 4);
       w.x.ras_colorize(dep, n, 0, Math.max(0.5, maxDepth), 2, rgba);
-      return { stats: { area, maxDepth, cells }, rgba: w.get(Uint8ClampedArray, rgba, n * 4) };
+      return { stats: { area, maxDepth, cells }, depth: w.get(F32, dep, n), rgba: w.get(Uint8ClampedArray, rgba, n * 4) };
     });
   },
 };

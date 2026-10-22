@@ -3,16 +3,14 @@
  * (public servers are often at capacity and answer 429/504).
  */
 
-const MIRRORS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-];
+// Only mirrors that send CORS headers
+const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const TIMEOUT_MS = 30_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Run an Overpass QL query; returns the `elements` array. */
-export async function overpass(query, { signal, attempts = 4 } = {}) {
+export async function overpass(query, { signal, attempts = 3 } = {}) {
   let lastErr;
   for (let a = 0; a < attempts; a++) {
     const url = MIRRORS[a % MIRRORS.length];
@@ -20,7 +18,7 @@ export async function overpass(query, { signal, attempts = 4 } = {}) {
       const res = await fetch(url, {
         method: 'POST',
         body: new URLSearchParams({ data: query }),
-        signal,
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
       });
       if (res.ok) return (await res.json()).elements || [];
       lastErr = new Error(`Overpass ${res.status}`);

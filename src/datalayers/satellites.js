@@ -1,4 +1,4 @@
-import { Cartesian3, Cartographic, Color, Material, PolylineCollection, Math as CesiumMath } from 'cesium';
+import { Cartesian3, Cartographic, Color, Ellipsoid, Material, PolylineCollection, Math as CesiumMath } from 'cesium';
 import { BaseLayer, PointSet } from './BaseLayer';
 import { cached } from './cache';
 import { parseTLE, unixToJd, jdToUnix } from './tle';
@@ -207,6 +207,27 @@ class SatelliteLayer extends BaseLayer {
     for (let k = 0; k < out.length; k += 4) passes.push({ rise: jdToUnix(out[k]), maxEl: out[k + 2], set: jdToUnix(out[k + 3]) });
     sel.passes = { lat, lon, list: passes };
     this.ctx.changed();
+  }
+
+  /** Satellites currently above `minEl` degrees as seen from a ground point, highest first. */
+  visibleFrom(lat, lon, minEl = 10) {
+    if (!this.positions) return [];
+    const obs = Cartesian3.fromDegrees(lon, lat, 0);
+    const up = Ellipsoid.WGS84.geodeticSurfaceNormal(obs, new Cartesian3());
+    const d = new Cartesian3();
+    const out = [];
+    for (let i = 0; i < this.sats.length; i++) {
+      d.x = this.positions[3 * i] - obs.x;
+      d.y = this.positions[3 * i + 1] - obs.y;
+      d.z = this.positions[3 * i + 2] - obs.z;
+      if (Number.isNaN(d.x)) continue;
+      const el = Math.asin(Cartesian3.dot(d, up) / Cartesian3.magnitude(d)) * (180 / Math.PI);
+      if (el >= minEl) {
+        const s = this.sats[i];
+        out.push({ norad: s.norad, name: s.name, group: GROUPS[s.group].label, color: GROUPS[s.group].color, el, rangeKm: Cartesian3.magnitude(d) / 1000 });
+      }
+    }
+    return out.sort((a, b) => b.el - a.el).slice(0, 30);
   }
 
   runAction(id) {

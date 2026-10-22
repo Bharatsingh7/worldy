@@ -122,6 +122,7 @@ export default class FlightLayer {
 
     this.handler = new ScreenSpaceEventHandler(this.scene.canvas);
     this.handler.setInputAction((e) => {
+      if (viewer.container.dataset.drawing) return;
       const picked = this.scene.pick(e.position);
       const id = picked?.id?.worldyFlight;
       if (id) this.onPick(id);

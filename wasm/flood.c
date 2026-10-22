@@ -1,7 +1,7 @@
 /*
  * Flood fill ("bathtub" model with connectivity).
  *
- * Sea-level rise: water starts from the sea (cells ≤ 0 m) and fills every connected cell
+ * Sea-level rise: water starts from the sea (cells ≤ 0.5 m, elevation models' sea surface) and fills every connected cell
  * lower than the new sea level. Local flood: starts from a chosen cell instead, filling
  * connected ground below (that cell's height + rise). Water doesn't jump over ridges.
  *
@@ -25,7 +25,7 @@ EXPORT(fl_fill) int fl_fill(const float *h, int w, int hgt, double dx, double dy
     seen[s] = 1;
   } else {
     for (int i = 0; i < n; i++)
-      if (h[i] <= 0) { stack[sp++] = i; seen[i] = 1; }
+      if (h[i] <= 0.5f) { stack[sp++] = i; seen[i] = 1; }
   }
 
   double area = 0, maxDepth = 0;
@@ -33,7 +33,7 @@ EXPORT(fl_fill) int fl_fill(const float *h, int w, int hgt, double dx, double dy
   while (sp) {
     int i = stack[--sp];
     double dep = level - h[i];
-    if (dep > 0 && (seedX >= 0 || h[i] > 0)) {
+    if (dep > 0 && (seedX >= 0 || h[i] > 0.5f)) {
       depth[i] = (float)dep;
       area += dx * dy;
       if (dep > maxDepth) maxDepth = dep;
