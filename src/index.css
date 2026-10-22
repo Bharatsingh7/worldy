@@ -954,6 +954,48 @@ input[type="range"]::-moz-range-thumb {
   background: #c93a3a;
 }
 
+/* --- Settings tab --- */
+.mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--space-sm);
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: var(--font-sans);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.mode-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-card.active {
+  background: rgba(108, 140, 255, 0.12);
+  border-color: rgba(108, 140, 255, 0.45);
+}
+
+.mode-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.mode-desc {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
 /* --- Flights tab --- */
 .flight-search {
   display: flex;

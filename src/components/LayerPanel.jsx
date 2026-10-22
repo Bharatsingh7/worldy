@@ -1,11 +1,6 @@
 import React, { useState } from 'react';
-import { OVERLAY_LAYERS, TERRAIN_OPTIONS, getLayersByCategory, CATEGORIES } from '../layers';
+import { TERRAIN_OPTIONS, getLayersByCategory, CATEGORIES } from '../layers';
 
-const TABS = [
-  { id: 'map', label: 'Map' },
-  { id: 'overlays', label: 'Overlays' },
-  { id: 'flights', label: 'Flights' },
-];
 
 const LayersIcon = (props) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -16,21 +11,17 @@ const LayersIcon = (props) => (
 );
 
 /**
- * Side panel — tabs for base map, overlays and flights.
- * Collapses to a single floating button.
+ * Side panel — the Map tab (base map + terrain) is built in; other tabs
+ * ({ id, label, badge?, content }) are passed in. Collapses to a floating button.
  */
 export default function LayerPanel({
   activeImageryId,
   onImageryChange,
-  activeOverlays,
-  onOverlayToggle,
-  overlayOpacity,
-  onOverlayOpacityChange,
   activeTerrainId,
   onTerrainChange,
   terrainExaggeration,
   onTerrainExaggerationChange,
-  flightsTab,
+  tabs,
   isOpen,
   onToggle,
 }) {
@@ -52,7 +43,7 @@ export default function LayerPanel({
       {/* Header: tabs + close */}
       <div className="side-panel-header">
         <div className="tabs" role="tablist">
-          {TABS.map((t) => (
+          {[{ id: 'map', label: 'Map' }, ...tabs].map((t) => (
             <button
               key={t.id}
               role="tab"
@@ -61,7 +52,7 @@ export default function LayerPanel({
               onClick={() => setTab(t.id)}
             >
               {t.label}
-              {t.id === 'overlays' && activeOverlays.length > 0 && <span className="tab-badge">{activeOverlays.length}</span>}
+              {t.badge > 0 && <span className="tab-badge">{t.badge}</span>}
             </button>
           ))}
         </div>
@@ -133,44 +124,7 @@ export default function LayerPanel({
           </>
         )}
 
-        {tab === 'overlays' && (
-          <section className="layer-section">
-            <div className="layer-section-title">Stack on top of the base map</div>
-            {OVERLAY_LAYERS.map((layer) => {
-              const on = activeOverlays.includes(layer.id);
-              return (
-                <div key={layer.id} className={`overlay-item ${on ? 'on' : ''}`}>
-                  <div id={`overlay-${layer.id}`} className="toggle-row" onClick={() => onOverlayToggle(layer.id)}>
-                    <div className="toggle-row-info">
-                      <div className="toggle-row-icon">{layer.icon}</div>
-                      <div>
-                        <div className="toggle-row-label">{layer.name}</div>
-                        <div className="toggle-row-sublabel">{layer.description}</div>
-                      </div>
-                    </div>
-                    <div className={`toggle-switch ${on ? 'on' : ''}`} />
-                  </div>
-                  {on && (
-                    <div className="slider-row">
-                      <span className="slider-label">Opacity</span>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1"
-                        step="0.05"
-                        value={overlayOpacity[layer.id] ?? 1}
-                        onChange={(e) => onOverlayOpacityChange(layer.id, parseFloat(e.target.value))}
-                      />
-                      <span className="slider-value">{Math.round((overlayOpacity[layer.id] ?? 1) * 100)}%</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </section>
-        )}
-
-        {tab === 'flights' && flightsTab}
+        {tabs.map((t) => tab === t.id && <React.Fragment key={t.id}>{t.content}</React.Fragment>)}
       </div>
     </aside>
   );

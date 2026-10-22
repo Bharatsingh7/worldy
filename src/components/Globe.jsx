@@ -3,6 +3,8 @@ import { Viewer, SceneMode, Color, Cartesian3 } from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 
 import { IMAGERY_LAYERS, OVERLAY_LAYERS, TERRAIN_OPTIONS } from '../layers';
+import { applyPerfMode } from '../perf';
+import { installGroundGuard } from '../camera';
 
 /** Resolve a provider factory result that may or may not be a Promise. */
 const resolveProvider = (result) => Promise.resolve(result);
@@ -17,6 +19,7 @@ export default function Globe({
   overlayOpacity,
   activeTerrainId,
   terrainExaggeration,
+  perfMode,
   onViewerReady,
   onLoaded,
 }) {
@@ -54,10 +57,9 @@ export default function Globe({
       sceneMode: SceneMode.SCENE3D,
       scene3DOnly: true,
 
-      // Performance
-      requestRenderMode: false,
-      targetFrameRate: 60,
-      msaaSamples: 4,
+      // Render only when something changes (camera, tiles, data) — the big GPU saver
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
 
       // Don't add default imagery — we'll add our own
       baseLayer: false,
@@ -67,27 +69,17 @@ export default function Globe({
     const scene = viewer.scene;
     const globe = scene.globe;
 
-    // Enable lighting for realistic sun illumination
-    globe.enableLighting = true;
+    // Resolution, anti-aliasing, tile detail, lighting, frame cap
+    applyPerfMode(viewer, perfMode);
 
     // Depth testing against terrain
     globe.depthTestAgainstTerrain = true;
 
-    // Tile caching
-    globe.tileCacheSize = 1000;
-
     // Smooth tile loading
-    globe.preloadSiblings = true;
     globe.preloadAncestors = true;
-
-    // Level of detail
-    globe.maximumScreenSpaceError = 1.5; // Lower = sharper, higher = faster
 
     // Globe base color (oceans when no tiles loaded)
     globe.baseColor = Color.fromCssColorString('#0a1628');
-
-    // Show atmosphere ring
-    globe.showGroundAtmosphere = true;
 
     // Fog for distance
     scene.fog.enabled = true;
@@ -96,9 +88,6 @@ export default function Globe({
 
     // Background — deep space
     scene.backgroundColor = Color.fromCssColorString('#000000');
-
-    // High DPI
-    viewer.resolutionScale = window.devicePixelRatio || 1.0;
 
     // Logarithmic depth buffer for z-fighting prevention
     scene.logarithmicDepthBuffer = true;
@@ -117,6 +106,9 @@ export default function Globe({
       destination: Cartesian3.fromDegrees(30, 20, 20000000),
     });
 
+    // Never let the camera end up inside the terrain
+    const removeGuard = installGroundGuard(viewer);
+
     viewerRef.current = viewer;
     onViewerReady(viewer, creditContainer);
 
@@ -133,6 +125,7 @@ export default function Globe({
 
     return () => {
       clearTimeout(timeout);
+      removeGuard();
       if (viewerRef.current && !viewerRef.current.isDestroyed()) {
         viewerRef.current.destroy();
         viewerRef.current = null;
@@ -157,6 +150,7 @@ export default function Globe({
         const layers = viewer.imageryLayers;
         if (baseLayerRef.current) layers.remove(baseLayerRef.current);
         baseLayerRef.current = layers.addImageryProvider(provider, 0);
+        viewer.scene.requestRender();
       })
       .catch((err) => console.warn(`Imagery "${layerDef.id}" failed:`, err));
   }, [activeImageryId]);
@@ -176,6 +170,7 @@ export default function Globe({
         delete current[overlayId];
       }
     }
+    viewer.scene.requestRender();
 
     // Add new overlays
     for (const overlayId of activeOverlays) {
@@ -193,6 +188,7 @@ export default function Globe({
           newLayer.alpha = overlayOpacityRef.current[overlayId] ?? 1.0;
           layers.raiseToTop(newLayer);
           current[overlayId] = newLayer;
+          viewer.scene.requestRender();
         })
         .catch((err) => {
           console.warn(`Overlay "${overlayId}" failed:`, err);
@@ -207,6 +203,7 @@ export default function Globe({
     for (const [overlayId, cesiumLayer] of Object.entries(overlayLayersRef.current)) {
       if (cesiumLayer !== 'pending') cesiumLayer.alpha = overlayOpacity[overlayId] ?? 1.0;
     }
+    viewerRef.current?.scene.requestRender();
   }, [overlayOpacity]);
 
   // ── Switch Terrain ─────────────────────────────────────
@@ -221,6 +218,7 @@ export default function Globe({
       .then((provider) => {
         if (viewer.isDestroyed()) return;
         viewer.terrainProvider = provider;
+        viewer.scene.requestRender();
       })
       .catch((err) => console.warn(`Terrain "${terrainDef.id}" failed:`, err));
   }, [activeTerrainId]);
@@ -231,7 +229,15 @@ export default function Globe({
     if (!viewer || viewer.isDestroyed()) return;
 
     viewer.scene.verticalExaggeration = terrainExaggeration;
+    viewer.scene.requestRender();
   }, [terrainExaggeration]);
+
+  // ── Performance Mode ───────────────────────────────────
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return;
+    applyPerfMode(viewer, perfMode);
+  }, [perfMode]);
 
   return (
     <div

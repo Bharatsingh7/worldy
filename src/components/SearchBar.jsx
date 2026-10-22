@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Cartesian3, Math as CesiumMath } from 'cesium';
+import { flyToSafe } from '../camera';
 
 /**
  * SearchBar — geocode cities/places using Nominatim (free, no API key)
@@ -85,7 +85,7 @@ export default function SearchBar({ viewer }) {
       setQuery(result.shortName);
       setIsOpen(false);
 
-      // Calculate altitude based on bounding box size
+      // Viewing distance from the ground, based on bounding box size
       let altitude = 50000; // default ~50km
       if (result.boundingBox) {
         const [south, north, west, east] = result.boundingBox;
@@ -101,15 +101,7 @@ export default function SearchBar({ viewer }) {
         else altitude = 5000;
       }
 
-      viewer.camera.flyTo({
-        destination: Cartesian3.fromDegrees(result.lon, result.lat, altitude),
-        orientation: {
-          heading: CesiumMath.toRadians(0),
-          pitch: CesiumMath.toRadians(-45),
-          roll: 0,
-        },
-        duration: 2.0,
-      });
+      flyToSafe(viewer, { lon: result.lon, lat: result.lat, range: altitude });
     },
     [viewer]
   );

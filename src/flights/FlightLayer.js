@@ -3,8 +3,8 @@
  * (one BillboardCollection for ~10k planes) and draws the selected flight's
  * past track, predicted path and origin/destination airports.
  *
- * Positions are dead-reckoned every frame in a preRender listener, so planes
- * move smoothly between data polls without React re-renders.
+ * Positions are dead-reckoned on the shared 8 Hz ticker (not every frame) and one
+ * render is requested per tick, so the GPU idles between updates.
  */
 
 import {
@@ -28,6 +28,7 @@ import {
 } from 'cesium';
 
 import { positionAt, forecast, greatCircle, routeIsPlausible, distance } from './predict';
+import { onTick } from '../ticker';
 
 export const FLIGHT_COLORS = {
   civil: '#ffc94d',
@@ -110,8 +111,10 @@ export default class FlightLayer {
     this.follow = false;
     this.lastPathUpdate = 0;
 
-    this.onPreRender = () => this.update();
-    this.scene.preRender.addEventListener(this.onPreRender);
+    this.stopTicker = onTick(() => {
+      this.update();
+      this.scene.requestRender();
+    });
 
     this.handler = new ScreenSpaceEventHandler(this.scene.canvas);
     this.handler.setInputAction((e) => {
@@ -346,7 +349,7 @@ export default class FlightLayer {
 
   destroy() {
     this.setFollow(false);
-    this.scene.preRender.removeEventListener(this.onPreRender);
+    this.stopTicker();
     this.handler.destroy();
     this.scene.canvas.style.cursor = '';
     for (const p of [this.billboards, this.paths, this.points, this.labels]) this.scene.primitives.remove(p);

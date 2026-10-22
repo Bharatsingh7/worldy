@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Cartesian2, Cartesian3, Math as CesiumMath } from 'cesium';
+import { Cartesian2, Math as CesiumMath } from 'cesium';
+import { flyToSafe } from '../camera';
 
 import FlightLayer from './FlightLayer';
 import { fetchGlobal, fetchNearby, fetchMilitary, fetchRoute, fetchAircraft, fetchTrack, RateLimitError } from './api';
@@ -254,10 +255,7 @@ export default function useFlights(viewer) {
     const p = layerRef.current?.locate(id);
     if (!viewer || !p) return;
     setFollow(false);
-    viewer.camera.flyTo({
-      destination: Cartesian3.fromDegrees(p.lon, p.lat, Math.max(p.altM + 60_000, 120_000)),
-      duration: 1.5,
-    });
+    flyToSafe(viewer, { lon: p.lon, lat: p.lat, range: Math.max(p.altM + 60_000, 120_000), duration: 1.5 });
   }, [viewer]);
 
   /** Find by callsign, registration or ICAO hex; selects and flies to it. */

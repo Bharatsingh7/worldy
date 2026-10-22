@@ -6,6 +6,9 @@ import NavControls from './components/NavControls';
 import SearchBar from './components/SearchBar';
 import FlightPanel from './components/FlightPanel';
 import FlightInfoCard from './components/FlightInfoCard';
+import OverlayList from './components/OverlayList';
+import SettingsPanel from './components/SettingsPanel';
+import { loadPerfMode, savePerfMode } from './perf';
 import useFlights from './flights/useFlights';
 
 /**
@@ -28,10 +31,17 @@ export default function App() {
   const [activeTerrainId, setActiveTerrainId] = useState('ellipsoid');
   const [terrainExaggeration, setTerrainExaggeration] = useState(1);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [perfMode, setPerfMode] = useState(loadPerfMode);
+
+  const handlePerfMode = useCallback((mode) => {
+    setPerfMode(mode);
+    savePerfMode(mode);
+  }, []);
 
   const flights = useFlights(viewer);
 
   const handleViewerReady = useCallback((v, credits) => {
+    if (import.meta.env.DEV) window.__worldyViewer = v; // for debugging / automated checks
     setViewer(v);
     setCreditContainer(credits);
   }, []);
@@ -89,6 +99,7 @@ export default function App() {
         overlayOpacity={overlayOpacity}
         activeTerrainId={activeTerrainId}
         terrainExaggeration={terrainExaggeration}
+        perfMode={perfMode}
         onViewerReady={handleViewerReady}
         onLoaded={handleLoaded}
       />
@@ -106,15 +117,27 @@ export default function App() {
       <LayerPanel
         activeImageryId={activeImageryId}
         onImageryChange={setActiveImageryId}
-        activeOverlays={activeOverlays}
-        onOverlayToggle={handleOverlayToggle}
-        overlayOpacity={overlayOpacity}
-        onOverlayOpacityChange={handleOverlayOpacity}
         activeTerrainId={activeTerrainId}
         onTerrainChange={setActiveTerrainId}
         terrainExaggeration={terrainExaggeration}
         onTerrainExaggerationChange={setTerrainExaggeration}
-        flightsTab={<FlightPanel flights={flights} />}
+        tabs={[
+          {
+            id: 'overlays',
+            label: 'Overlays',
+            badge: activeOverlays.length,
+            content: (
+              <OverlayList
+                activeOverlays={activeOverlays}
+                onOverlayToggle={handleOverlayToggle}
+                overlayOpacity={overlayOpacity}
+                onOverlayOpacityChange={handleOverlayOpacity}
+              />
+            ),
+          },
+          { id: 'flights', label: 'Flights', content: <FlightPanel flights={flights} /> },
+          { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} /> },
+        ]}
         isOpen={isPanelOpen}
         onToggle={() => setIsPanelOpen((p) => !p)}
       />
