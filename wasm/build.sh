@@ -19,5 +19,5 @@ clang --target=wasm32 -O3 -msimd128 -nostdlib -ffreestanding -fno-builtin-memset
   -Wall -Wextra -Wno-unused-parameter \
   -Wl,--no-entry -Wl,--import-undefined -Wl,--strip-all -Wl,--initial-memory=4194304 \
   -o ../public/wasm/physics.wasm \
-  memory.c sim/swe.c sim/edlts.c sim/hbg.c sim/okada.c sim/cyclone.c sim/fire.c
+  memory.c sim/swe.c sim/edlts.c sim/hbg.c sim/okada.c sim/cyclone.c sim/fire.c sim/plume.c
 echo "built public/wasm/physics.wasm ($(wc -c < ../public/wasm/physics.wasm) bytes)"

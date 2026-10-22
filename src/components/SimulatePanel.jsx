@@ -45,18 +45,22 @@ export default function SimulatePanel({ sim, tools }) {
   const [mode, setMode] = useState('swe');
   const [areaId, setAreaId] = useState('');
   const [pointId, setPointId] = useState('');
+  const [lineId, setLineId] = useState('');
   const [buildings, setBuildings] = useState(true);
 
   const areas = tools.shapes.filter(isArea);
   const points = tools.shapes.filter((s) => s.type === 'point');
   const area = areas.find((a) => a.id === areaId) || areas[areas.length - 1];
   const point = points.find((p) => p.id === pointId) || points[points.length - 1];
+  const lines = tools.shapes.filter((s) => s.type === 'line');
+  const line = lines.find((l) => l.id === lineId) || lines[lines.length - 1];
+  const needsLine = scenario.needs.includes('line');
   const params = Object.fromEntries(scenario.params.map((p) => [p.key, values[`${scenarioId}.${p.key}`] ?? p.default]));
   const needsPoint = scenario.needs.includes('point');
   const busy = sim.status === 'preparing';
   const running = sim.status === 'running' || sim.status === 'paused' || sim.status === 'done';
   const modeOk = scenario.modes.includes(mode) ? mode : scenario.modes[0];
-  const canRun = area && (!needsPoint || point) && !busy;
+  const canRun = area && (!needsPoint || point) && (!needsLine || line) && !busy;
 
   return (
     <div className="simulate-panel">
@@ -104,6 +108,21 @@ export default function SimulatePanel({ sim, tools }) {
           ) : (
             <div className="hint warn">Also draw a Point (Tools tab) for the {scenario.pointLabel.toLowerCase()}.</div>
           ))}
+        {needsLine &&
+          (lines.length ? (
+            <div className="inline-form">
+              <span className="slider-label">{scenario.lineLabel}</span>
+              <select className="select" value={line?.id || ''} onChange={(e) => setLineId(e.target.value)}>
+                {lines.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="hint warn">Also draw a Line (Tools tab) from sea to land for the {scenario.lineLabel.toLowerCase()}.</div>
+          ))}
       </section>
 
       <section className="layer-section">
@@ -123,7 +142,7 @@ export default function SimulatePanel({ sim, tools }) {
             </div>
           </div>
         )}
-        <div className="toggle-row" onClick={() => setBuildings(!buildings)}>
+        {!scenario.gridSource && <div className="toggle-row" onClick={() => setBuildings(!buildings)}>
           <div className="toggle-row-info">
             <div className="toggle-row-icon">🏙️</div>
             <div>
@@ -132,7 +151,7 @@ export default function SimulatePanel({ sim, tools }) {
             </div>
           </div>
           <div className={`toggle-switch ${buildings ? 'on' : ''}`} />
-        </div>
+        </div>}
       </section>
 
       <section className="layer-section">
@@ -140,7 +159,7 @@ export default function SimulatePanel({ sim, tools }) {
           <button
             className="chip primary"
             disabled={!canRun}
-            onClick={() => sim.start({ scenarioId, params, mode: modeOk, area, point, buildings })}
+            onClick={() => sim.start({ scenarioId, params, mode: modeOk, area, point, line, buildings })}
           >
             {busy ? 'Preparing…' : running ? 'Restart' : '▶ Run simulation'}
           </button>

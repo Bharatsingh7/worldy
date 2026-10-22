@@ -1,8 +1,9 @@
 /*
  * Wildfire spread: Rothermel (1972) rate of spread with wind and slope, elliptical fire shape
  * (Anderson 1983 length-to-breadth ratio), and fire arrival times from a minimum-travel-time
- * sweep (Dijkstra on a 16-direction stencil, as in FlamMap's MTT method) — the front is a
- * true anisotropic eikonal solution, not a cellular automaton's diamond or square.
+ * sweep (Dijkstra on a 32-direction stencil, in the spirit of FlamMap's MTT method) — the front
+ * approximates the anisotropic eikonal solution, not a cellular automaton's diamond or square.
+ * Long steps only cross cells that can burn, so a river or road one cell wide still stops it.
  *
  * Fuels (Anderson's 13 NFFL models, 1-h dead fuel only, SI units):
  *   0 short grass (FM1), 1 tall grass (FM3), 2 chaparral (FM4), 3 brush (FM5),
@@ -27,7 +28,7 @@ static void rothermel(const Fuel *fu, double moisture, double *out) {
   double w0 = fu->w0 * 0.2048;                  /* kg/m² → lb/ft² */
   double depth = fu->depth / 0.3048;            /* m → ft */
   double rhoPft = rhoP * 0.06243;               /* kg/m³ → lb/ft³ */
-  double hft = h * 0.000430;                    /* kJ/kg → BTU/lb */
+  double hft = h * 0.42992;                     /* kJ/kg → BTU/lb */
   double rhoB = w0 / depth;
   double beta = rhoB / rhoPft;
   double betaOp = 3.348 * js_pow(sigma, -0.8189);
@@ -51,8 +52,43 @@ static void rothermel(const Fuel *fu, double moisture, double *out) {
   out[5] = 5.275 * js_pow(beta, -0.3);
 }
 
-static const int OX[16] = {1, 1, 0, -1, -1, -1, 0, 1, 2, 1, -1, -2, -2, -1, 1, 2};
-static const int OY[16] = {0, 1, 1, 1, 0, -1, -1, -1, 1, 2, 2, 1, -1, -2, -2, -1};
+/* 32 directions: every coprime step with |dx|,|dy| ≤ 3, so strongly wind-driven ellipses keep their flanks */
+#define NDIR 32
+/* Local fire-spread law at one cell: the ellipse with the ignition at its rear focus. */
+typedef struct { double head, ecc, hx, hy; } Spread;
+
+/* Travel time to cover displacement (ex, ey) metres: |d| / R(θ), R(θ) = head·(1−e)/(1−e·cosθ).
+ * Its unit ball is the fire ellipse itself, so τ is convex — exact for a homogeneous cell. */
+static inline double tau(const Spread *sp, double ex, double ey) {
+  double d = w_sqrt(ex * ex + ey * ey);
+  if (d < 1e-12) return 0;
+  double cosT = (ex * sp->hx + ey * sp->hy) / d;
+  double rate = sp->head * (1.0 - sp->ecc) / (1.0 - sp->ecc * cosT);
+  return rate > 1e-12 ? d / rate : INF_D;
+}
+
+/*
+ * Two-point (ordered-upwind) update: reach (0,0) from the segment between accepted points
+ * A (time ta, offset ax,ay) and B (tb, bx,by); min over λ of (1−λ)ta + λtb + τ(−P(λ)).
+ * Convex in λ → golden-section search.
+ */
+static double two_point(const Spread *sp, double ta, double ax, double ay, double tb, double bx, double by) {
+  const double gr = 0.6180339887498949;
+  double lo = 0, hi = 1;
+  double l1 = hi - gr * (hi - lo), l2 = lo + gr * (hi - lo);
+#define F2(l) ((1 - (l)) * ta + (l) * tb + tau(sp, -((1 - (l)) * ax + (l) * bx), -((1 - (l)) * ay + (l) * by)))
+  double f1 = F2(l1), f2 = F2(l2);
+  for (int it = 0; it < 24; it++) {
+    if (f1 < f2) { hi = l2; l2 = l1; f2 = f1; l1 = hi - gr * (hi - lo); f1 = F2(l1); }
+    else { lo = l1; l1 = l2; f1 = f2; l2 = lo + gr * (hi - lo); f2 = F2(l2); }
+  }
+  double l = 0.5 * (lo + hi);
+  return F2(l);
+#undef F2
+}
+
+static const int OX[NDIR] = {1, 1, 0, -1, -1, -1, 0, 1, 2, 1, -1, -2, -2, -1, 1, 2, 3, 3, 2, 1, -1, -2, -3, -3, -3, -3, -2, -1, 1, 2, 3, 3};
+static const int OY[NDIR] = {0, 1, 1, 1, 0, -1, -1, -1, 1, 2, 2, 1, -1, -2, -2, -1, 1, 2, 3, 3, 3, 3, 2, 1, -1, -2, -3, -3, -3, -3, -2, -1};
 
 /*
  * Arrival time (s) of a fire lit at the ignition cells (ign[i] = 1) — NaN where it never arrives.
@@ -77,9 +113,11 @@ EXPORT(fire_spread) int fire_spread(const double *z, const u8 *burnable, const u
   double wdx = js_sin(windToDeg * DEG), wdy = -js_cos(windToDeg * DEG); /* grid y points south */
 
   double *t = (double *)walloc((u32)n * 8u);
-  for (int i = 0; i < n; i++) t[i] = INF_D;
+  u8 *done = (u8 *)walloc((u32)n);
+  Spread *law = (Spread *)walloc((u32)n * sizeof(Spread));
+  for (int i = 0; i < n; i++) { t[i] = INF_D; done[i] = 0; law[i].head = -1; }
   Heap q;
-  heap_init(&q, n * 16 + 16);
+  heap_init(&q, n * NDIR + 16);
   for (int i = 0; i < n; i++)
     if (ign[i] && burnable[i]) { t[i] = 0; heap_push(&q, i, 0); }
 
@@ -87,7 +125,8 @@ EXPORT(fire_spread) int fire_spread(const double *z, const u8 *burnable, const u
   while (q.size) {
     double ti;
     int i = heap_pop(&q, &ti);
-    if (ti > t[i] || ti > tMax) continue;
+    if (ti > t[i] || ti > tMax || done[i]) continue;
+    done[i] = 1;
     int x = i % w, y = i / w;
     /* local slope (upslope direction) for φs */
     int xl = x > 0 ? i - 1 : i, xr = x < w - 1 ? i + 1 : i, yu = y > 0 ? i - w : i, yd = y < hgt - 1 ? i + w : i;
@@ -101,11 +140,24 @@ EXPORT(fire_spread) int fire_spread(const double *z, const u8 *burnable, const u
     double head = R0 * (1.0 + phi);
     if (head > headMax) headMax = head;
     double hx = phi > 1e-9 ? vx / phi : 1, hy = phi > 1e-9 ? vy / phi : 0;
-    for (int k = 0; k < 16; k++) {
+    Spread sp = {head, ecc, hx, hy};
+    law[i] = sp;
+    for (int k = 0; k < NDIR; k++) {
       int nx_ = x + OX[k], ny_ = y + OY[k];
       if (nx_ < 0 || ny_ < 0 || nx_ >= w || ny_ >= hgt) continue;
       int j = ny_ * w + nx_;
       if (!burnable[j]) continue;
+      /* intermediate cells of a long step must burn too */
+      int span = OX[k] < 0 ? -OX[k] : OX[k];
+      int sy_ = OY[k] < 0 ? -OY[k] : OY[k];
+      if (sy_ > span) span = sy_;
+      int blocked = 0;
+      for (int m = 1; m < span && !blocked; m++) {
+        int ix = x + (int)(OX[k] * m / (double)span + (OX[k] >= 0 ? 0.5 : -0.5));
+        int iy = y + (int)(OY[k] * m / (double)span + (OY[k] >= 0 ? 0.5 : -0.5));
+        if (!burnable[iy * w + ix]) blocked = 1;
+      }
+      if (blocked) continue;
       double ex = OX[k] * dx, ey = OY[k] * dy;
       double d = w_sqrt(ex * ex + ey * ey);
       double cosT = (ex * hx + ey * hy) / d;
@@ -113,6 +165,20 @@ EXPORT(fire_spread) int fire_spread(const double *z, const u8 *burnable, const u
       double rate = head * (1.0 - ecc) / (1.0 - ecc * cosT);
       if (rate <= 1e-9) continue;
       double tj = ti + d / rate;
+      /* two-point updates for the 8 nearest neighbours: segment from i to another burned cell next to j */
+      if (span == 1 && !done[j]) {
+        for (int a = -1; a <= 1; a++)
+          for (int b2 = -1; b2 <= 1; b2++) {
+            int kx = nx_ + b2, ky = ny_ + a;
+            if ((!a && !b2) || kx < 0 || ky < 0 || kx >= w || ky >= hgt) continue;
+            int kk = ky * w + kx;
+            if (kk == i || !done[kk]) continue;
+            /* k must be adjacent to i so the segment lies inside one triangle */
+            if (kx - x > 1 || x - kx > 1 || ky - y > 1 || y - ky > 1) continue;
+            double t2 = two_point(&sp, ti, (x - nx_) * dx, (y - ny_) * dy, t[kk], (kx - nx_) * dx, (ky - ny_) * dy);
+            if (t2 < tj) tj = t2;
+          }
+      }
       if (tj < t[j]) { t[j] = tj; heap_push(&q, j, tj); }
     }
   }

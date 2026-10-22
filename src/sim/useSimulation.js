@@ -3,7 +3,8 @@ import { ScreenSpaceEventHandler, ScreenSpaceEventType, Cartographic, Math as Ce
 
 import PhysicsEngine from './engine';
 import WaterSurfacePrimitive from './render/WaterSurfacePrimitive';
-import { prepareGrid, cellOf, cellLonLat } from './grid';
+import TracerLayer from './render/TracerLayer';
+import { prepareGrid, prepareOceanGrid, cellOf, cellLonLat } from './grid';
 import { fetchBuildings, porosityFrom, buildingsPrimitive } from './buildings';
 import { scenarioById } from './scenarios';
 import { loadPerfMode } from '../perf';
@@ -39,6 +40,8 @@ export default function useSimulation(viewer, { ensureTerrain }) {
   const engineRef = useRef(null);
   const waterRef = useRef(null);
   const buildingsRef = useRef(null);
+  const tracersRef = useRef(null);
+  const fixedScaleRef = useRef(false);
   const gridRef = useRef(null);
   const statsTick = useRef(0);
   const gaugesRef = useRef([]);
@@ -52,8 +55,10 @@ export default function useSimulation(viewer, { ensureTerrain }) {
     if (viewer && !viewer.isDestroyed()) {
       if (waterRef.current) viewer.scene.primitives.remove(waterRef.current);
       if (buildingsRef.current) viewer.scene.primitives.remove(buildingsRef.current);
+      tracersRef.current?.destroy();
       viewer.scene.requestRender();
     }
+    tracersRef.current = null;
     waterRef.current = null;
     buildingsRef.current = null;
     gridRef.current = null;
@@ -73,8 +78,9 @@ export default function useSimulation(viewer, { ensureTerrain }) {
       const water = waterRef.current;
       if (!water) return;
       water.setFrame(data.depth, data.speed);
+      if (data.tracers && tracersRef.current) tracersRef.current.update(data.tracers.x, data.tracers.y, data.depth);
       // colour scale follows the flood (95th percentile of wet depths, at least 0.5 m)
-      if (statsTick.current % 15 === 0) {
+      if (!fixedScaleRef.current && statsTick.current % 15 === 0) {
         const wet = [];
         for (let i = 0; i < data.depth.length; i += 7) if (data.depth[i] > 0.05) wet.push(data.depth[i]);
         wet.sort((a, b) => a - b);
@@ -98,7 +104,7 @@ export default function useSimulation(viewer, { ensureTerrain }) {
 
   /** Prepare everything for a scenario and start it. */
   const start = useCallback(
-    async ({ scenarioId, params, mode, area, point, buildings }) => {
+    async ({ scenarioId, params, mode, area, point, line, buildings }) => {
       if (!viewer) return;
       clear();
       const scenario = scenarioById(scenarioId);
@@ -106,9 +112,18 @@ export default function useSimulation(viewer, { ensureTerrain }) {
         setStatus('preparing');
         setMessage('Switching on corrected 3D terrain…');
         await ensureTerrain?.();
-        setMessage('Sampling terrain for the simulation grid…');
         const maxCells = MAX_CELLS[loadPerfMode()] || 224;
-        const grid = await prepareGrid(area, maxCells, { padFrac: scenario.domainPad ?? 0.05, minSpanM: scenario.domainPad ? 3000 : 800 });
+        if (scenario.needs.includes('line') && !line) throw new Error(`Draw a Line (Tools tab) for the ${scenario.lineLabel.toLowerCase()}.`);
+        let grid;
+        if (scenario.gridSource === 'etopo') {
+          setMessage('Loading NOAA ETOPO bathymetry for the ocean domain…');
+          const bounds = scenario.domain(area, point, line);
+          if (bounds[2] - bounds[0] > 30 || bounds[3] - bounds[1] > 30) throw new Error('Domain too large (> 30°): keep the area, source and track closer together.');
+          grid = await prepareOceanGrid(bounds, Math.min(maxCells, 256));
+        } else {
+          setMessage('Sampling terrain for the simulation grid…');
+          grid = await prepareGrid(area, maxCells, { padFrac: scenario.domainPad ?? 0.05, minSpanM: scenario.domainPad ? 3000 : 800 });
+        }
         gridRef.current = grid;
         const groundAt = (lon, lat) => {
           const c = cellOf(grid, lon, lat);
@@ -117,7 +132,7 @@ export default function useSimulation(viewer, { ensureTerrain }) {
 
         let builtCells = 0;
         let buildingCount = 0;
-        if (buildings) {
+        if (buildings && !grid.ocean) {
           setMessage('Loading OpenStreetMap buildings…');
           try {
             const { list, skipped } = await fetchBuildings(grid.bounds);
@@ -142,20 +157,35 @@ export default function useSimulation(viewer, { ensureTerrain }) {
         const pointCell = point ? cellOf(grid, ...(point.center || point.points[0])) : -1;
         if (scenario.needs.includes('point') && pointCell < 0) throw new Error(`${scenario.pointLabel || 'The point'} must be inside the simulation area.`);
 
-        const cfg = scenario.configure(grid, params, { area, point, pointCell, mask });
+        const cfg = scenario.configure(grid, params, { area, point, line, pointCell, mask });
         const fullCfg = {
           mode,
           speed: scenario.speed,
+          bounds: grid.bounds,
           ...cfg,
           grid: { nx: grid.nx, ny: grid.ny, dx: grid.dx, dy: grid.dy, z: grid.z, phi: grid.phi, ...cfg.grid },
           probes: gaugesRef.current.map((g) => g.cell),
         };
 
-        const water = new WaterSurfacePrimitive({ nx: grid.nx, ny: grid.ny, bounds: grid.bounds, ground: grid.ground, cellSize: grid.cellSize });
+        const water = new WaterSurfacePrimitive({ nx: grid.nx, ny: grid.ny, bounds: grid.bounds, ground: grid.ground, bed: grid.bed || grid.z, cellSize: grid.cellSize });
+        water.mode = scenario.render || 0;
+        if (water.mode >= 2) {
+          water.lift = 0;
+          water.maxDepth = 1;
+        }
+        if (cfg.colorScale) water.maxDepth = cfg.colorScale;
+        fixedScaleRef.current = water.mode !== 0;
         if (scenarioId === 'lava') water.colors = ['#ffcc33', '#b01800'];
         if (scenarioId === 'debris') water.colors = ['#b08b5a', '#4a3520'];
         if (scenarioId === 'avalanche') water.colors = ['#ffffff', '#b8c8de'];
         waterRef.current = viewer.scene.primitives.add(water);
+        if (cfg.tracers) {
+          tracersRef.current = new TracerLayer(viewer, grid, {
+            count: cfg.tracers.count,
+            height: cfg.tracers.source === 'wind' ? 1500 : 0,
+            color: cfg.tracers.source === 'wind' ? '#e8f4ff' : '#ffffff',
+          });
+        }
 
         const engine = new PhysicsEngine({
           onFrame,
