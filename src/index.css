@@ -1321,6 +1321,129 @@ input[type="range"]::-moz-range-thumb {
   color: var(--color-text-muted);
 }
 
+/* --- Simulate tab --- */
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.scenario-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font: 500 11.5px var(--font-sans);
+  color: var(--color-text-secondary);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.scenario-card:hover {
+  color: var(--color-text-primary);
+}
+
+.scenario-card.active {
+  color: #fff;
+  background: rgba(108, 140, 255, 0.16);
+  border-color: rgba(108, 140, 255, 0.5);
+}
+
+.scenario-icon {
+  font-size: 16px;
+}
+
+.sim-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--space-xs);
+}
+
+.chip.primary {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.chip.primary:disabled {
+  background: rgba(108, 140, 255, 0.3);
+}
+
+.gauge {
+  margin-top: var(--space-sm);
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+}
+
+.gauge-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+}
+
+.gauge-now {
+  font: 11px var(--font-mono);
+  color: var(--color-accent-bright);
+}
+
+.sim-timeline {
+  position: absolute;
+  left: 50%;
+  bottom: var(--bottom-clear);
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 6px var(--space-md);
+  border-radius: var(--radius-lg);
+  max-width: calc(100vw - 2 * var(--panel-w) - 80px);
+}
+
+.sim-clock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sim-name {
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-time {
+  font: 600 16px var(--font-mono);
+}
+
+.select.speed {
+  flex: none;
+  width: auto;
+}
+
+.sim-stats {
+  display: flex;
+  gap: var(--space-md);
+  font: 11px var(--font-mono);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.sim-done {
+  font-size: 11px;
+  color: var(--color-success);
+}
+
 /* --- Flights tab --- */
 .flight-search {
   display: flex;
@@ -1561,6 +1684,15 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .status-credits {
+    display: none;
+  }
+
+  .sim-timeline {
+    max-width: calc(100vw - 20px);
+    bottom: calc(var(--bottom-clear) + 4px);
+  }
+
+  .sim-stats {
     display: none;
   }
 

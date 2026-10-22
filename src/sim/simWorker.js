@@ -77,6 +77,8 @@ function applyForcing(t) {
   w.x.sim_set(sim, 3, S.rain);
   for (const inf of cfg.inflows || []) w.x.sim_inflow(sim, inf.cell, Math.max(0, series(inf.q, t)));
   if (f.level) f.level.forEach((ser, side) => ser && w.x.sim_set(sim, 30 + side, series(ser, t)));
+  // anything newly forced (rain starting, an inflow opening) must be awake to respond
+  if (cfg.mode !== 'hbg') w.x.sim_wake_forced(sim);
 }
 
 function postFrame(force = false) {
@@ -88,7 +90,9 @@ function postFrame(force = false) {
     depth = w.get(Float32Array, S.depthPtr, n);
   } else {
     const changed = w.x.sim_frame(sim, S.depthPtr, S.speedPtr, S.dirtyPtr);
-    if (!changed && !force) return;
+    const now = performance.now();
+    if (!changed && !force && now - (S.lastPost || 0) < 1000) return; // heartbeat keeps the clock moving
+    S.lastPost = now;
     depth = w.get(Float32Array, S.depthPtr, n);
     speed = w.get(Float32Array, S.speedPtr, n);
   }

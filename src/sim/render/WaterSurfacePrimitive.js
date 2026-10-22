@@ -153,8 +153,9 @@ export default class WaterSurfacePrimitive {
       blending: BlendingState.ALPHA_BLEND,
       cull: { enabled: false },
     });
-    const shallow = Color.fromCssColorString('#7fd3ff');
-    const deep = Color.fromCssColorString('#0b3a8c');
+    const [c0, c1] = this.colors || ['#7fd3ff', '#0b3a8c'];
+    const shallow = Color.fromCssColorString(c0);
+    const deep = Color.fromCssColorString(c1);
     const cellSize = this.grid.cellSize || 10;
     this._command = new DrawCommand({
       vertexArray: va,

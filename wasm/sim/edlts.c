@@ -201,6 +201,17 @@ void sim_wake(Sim *s, int b, double t) {
   heap_push(&s->queue, b, s->bt[b]);
 }
 
+/* Forcing changed (rain started, an inflow opened, a boundary level rose): wake the blocks it reaches. */
+EXPORT(sim_wake_forced) int sim_wake_forced(Sim *s) {
+  int woke = 0;
+  for (int b = 0; b < s->nb; b++)
+    if (!s->awake[b] && block_has_forcing(s, b)) {
+      sim_wake(s, b, s->time);
+      woke++;
+    }
+  return woke;
+}
+
 /* Initialise clocks at t0 and wake every block that is wet or forced. */
 EXPORT(sim_start) void sim_start(Sim *s, double t0) {
   s->time = t0;

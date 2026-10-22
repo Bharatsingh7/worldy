@@ -13,12 +13,15 @@ import InfoCard from './components/InfoCard';
 import ToolsPanel from './components/ToolsPanel';
 import ResultCard from './components/ResultCard';
 import useTools from './tools/useTools';
+import useSimulation from './sim/useSimulation';
+import SimulatePanel from './components/SimulatePanel';
+import SimTimeline from './components/SimTimeline';
 import { boundsOf } from './tools/grid';
 import { Rectangle } from 'cesium';
 import { readHash, applyHashView, syncHash } from './urlState';
 import { loadPerfMode, savePerfMode } from './perf';
 import { loadBareEarth, saveBareEarth } from './terrain/geoid';
-import { flyToSafe } from './camera';
+import { flyToSafe, hasTerrain } from './camera';
 import useFlights from './flights/useFlights';
 import useDataLayers from './datalayers/useDataLayers';
 import usePicking from './usePicking';
@@ -72,6 +75,19 @@ export default function App() {
   const dataLayers = useDataLayers(viewer);
 
   const tools = useTools(viewer, { getLayer: dataLayers.get });
+
+  // Simulations need the corrected 3D terrain under the water: switch it on and wait for it
+  const ensureTerrain = useCallback(
+    () =>
+      new Promise((resolve) => {
+        setActiveTerrainId('esri-world');
+        const t0 = Date.now();
+        const check = () => (!viewer || hasTerrain(viewer) || Date.now() - t0 > 15000 ? resolve() : setTimeout(check, 200));
+        check();
+      }),
+    [viewer]
+  );
+  const sim = useSimulation(viewer, { ensureTerrain });
 
   // One card at a time: picking a layer item closes the flight card and vice versa
   const { select } = flights;
@@ -207,6 +223,7 @@ export default function App() {
             ),
           },
           { id: 'tools', label: 'Tools', badge: tools.shapes.length, content: <ToolsPanel tools={tools} onFocus={focusShape} /> },
+          { id: 'simulate', label: 'Simulate', content: <SimulatePanel sim={sim} tools={tools} /> },
           { id: 'settings', label: 'Settings', content: <SettingsPanel perfMode={perfMode} onPerfModeChange={handlePerfMode} bareEarth={bareEarth} onBareEarthChange={handleBareEarth} /> },
         ]}
         isOpen={isPanelOpen}
@@ -226,6 +243,9 @@ export default function App() {
         )}
         <ResultCard tools={tools} onFlyTo={(lon, lat) => flyToSafe(viewer, { lon, lat, range: 8000 })} />
       </div>
+
+      {/* Live simulation clock */}
+      <SimTimeline sim={sim} />
 
       {/* Navigation Controls */}
       <NavControls viewer={viewer} />
