@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "build:wasm": "sh wasm/build.sh",
+    "predev": "sh wasm/build.sh",
     "dev": "vite",
+    "prebuild": "sh wasm/build.sh",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"

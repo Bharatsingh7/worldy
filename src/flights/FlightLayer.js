@@ -29,6 +29,7 @@ import {
 
 import { positionAt, forecast, greatCircle, routeIsPlausible, distance } from './predict';
 import { onTick } from '../ticker';
+import { getMainWasm, loadMainWasm } from '../compute/client';
 
 export const FLIGHT_COLORS = {
   civil: '#ffc94d',
@@ -80,10 +81,12 @@ export const categoryOf = (f) => (f.military ? 'military' : f.onGround ? 'ground
 
 const scratch = new Cartesian3();
 
-/** Per-frame time budget (ms) for repositioning planes at globe scale. */
-const FRAME_BUDGET_MS = 4;
-/** Below this camera height only planes inside the view are moved, every frame. */
+/** Planes repositioned per tick at globe scale (round-robin through the rest). */
+const GLOBE_BATCH = 4000;
+/** Below this camera height only planes inside the view are moved, every tick. */
 const VIEW_CULL_HEIGHT = 1_500_000;
+/** Stale reports are extrapolated at most this long (s). */
+const MAX_EXTRAPOLATION = 120;
 
 export default class FlightLayer {
   constructor(viewer, { onPick }) {
@@ -111,6 +114,7 @@ export default class FlightLayer {
     this.follow = false;
     this.lastPathUpdate = 0;
 
+    loadMainWasm();
     this.stopTicker = onTick(() => {
       this.update();
       this.scene.requestRender();
@@ -219,6 +223,43 @@ export default class FlightLayer {
     return p;
   }
 
+  /** Dead-reckon many planes in one call into the C core (falls back to JS). */
+  moveBatch(list, now) {
+    const w = getMainWasm();
+    if (!w || this.forecastSec > 0) {
+      for (const item of list) this.move(item, now);
+      return;
+    }
+    const n = list.length;
+    if (!n) return;
+    const mark = w.mark();
+    const inPtr = w.reserve(Float64Array, n * 7);
+    const outPtr = w.reserve(Float64Array, n * 3);
+    const input = w.view(Float64Array, inPtr, n * 7);
+    for (let k = 0; k < n; k++) {
+      const f = list[k].flight;
+      const o = 7 * k;
+      input[o] = f.lat;
+      input[o + 1] = f.lon;
+      input[o + 2] = f.altM;
+      input[o + 3] = f.speedMs;
+      input[o + 4] = f.headingDeg;
+      input[o + 5] = f.vertRateMs;
+      input[o + 6] = f.onGround ? 0 : Math.min(MAX_EXTRAPOLATION, Math.max(0, (now - f.ts) / 1000));
+    }
+    w.x.dr_batch(inPtr, n, outPtr);
+    const out = w.view(Float64Array, outPtr, n * 3);
+    for (let k = 0; k < n; k++) {
+      const b = list[k].billboard;
+      scratch.x = out[3 * k];
+      scratch.y = out[3 * k + 1];
+      scratch.z = out[3 * k + 2];
+      b.position = scratch;
+      b.rotation = -CesiumMath.toRadians(list[k].flight.headingDeg);
+    }
+    w.release(mark);
+  }
+
   update() {
     const now = Date.now();
     const camera = this.viewer.camera;
@@ -226,8 +267,9 @@ export default class FlightLayer {
     const selItem = selId && this.items.get(selId);
     const selPos = selItem ? this.move(selItem, now) : null;
 
-    // Zoomed in: move only what's on screen, every frame (smooth close-up motion)
+    // Zoomed in: move only what's on screen, every tick (smooth close-up motion)
     const rect = camera.positionCartographic.height < VIEW_CULL_HEIGHT ? camera.computeViewRectangle() : undefined;
+    const batch = [];
     if (rect) {
       const pad = 0.02; // ~1° in radians
       const w = rect.west - pad, e = rect.east + pad, s = rect.south - pad, n = rect.north + pad;
@@ -238,21 +280,18 @@ export default class FlightLayer {
         const lon = item.flight.lon * RAD;
         if (lat < s || lat > n) continue;
         if (wraps ? lon < w && lon > e : lon < w || lon > e) continue;
-        this.move(item, now);
+        batch.push(item);
       }
     } else {
-      // Globe view: sweep through all planes round-robin within a time budget;
-      // the few-ms lag per plane is far below a pixel at this scale
-      const start = performance.now();
+      // Globe view: sweep round-robin; a plane lagging a second is far below a pixel here
       const order = this.order;
-      for (let n = 0; n < order.length && performance.now() - start < FRAME_BUDGET_MS; n += 64) {
-        for (let k = 0; k < 64 && n + k < order.length; k++) {
-          if (this.cursor >= order.length) this.cursor = 0;
-          const item = order[this.cursor++][1];
-          if (item.billboard.show && item !== selItem) this.move(item, now);
-        }
+      for (let k = 0; k < Math.min(GLOBE_BATCH, order.length); k++) {
+        if (this.cursor >= order.length) this.cursor = 0;
+        const item = order[this.cursor++][1];
+        if (item.billboard.show && item !== selItem) batch.push(item);
       }
     }
+    this.moveBatch(batch, now);
 
     if (now - this.lastPathUpdate > 1000) {
       this.lastPathUpdate = now;
