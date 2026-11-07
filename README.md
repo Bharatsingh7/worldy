@@ -23,11 +23,11 @@
 * 🗺️ **Diverse Cartographic Styles**: Switch seamlessly between OpenStreetMap, Esri World Topographic, National Geographic World Map, CARTO Dark Matter & Voyager, Ocean Bathymetry, and NASA Black Marble Earth at Night.
 * 🔍 **Instant Worldwide Geocoding**: Search for any city, landmark, mountain, country, or coordinate worldwide via integrated OpenStreetMap Nominatim with smart fly-to altitude calculation and keyboard navigation.
 * 📑 **Independent Stackable Overlays**: High-zoom vector place labels (CARTO dark labels), administrative international & state boundaries (Esri), and public transit networks (MeMoMaps), each with its own opacity slider.
-* 🏔️ **3D Terrain & Elevation**: Keyless global terrain (Esri World Elevation 3D) with customizable vertical height exaggeration (1× to 10×) and depth testing against terrain geometry.
+* 🏔️ **Correct 3D terrain**: Esri World Elevation 3D, geoid-corrected (EGM96), with no-data holes and spikes rebuilt and an optional bare-earth filter for tree/building bumps on flat ground. Exaggeration 1×–10×.
 * ✈️ **Live Flight Tracking**: ~10–15k aircraft worldwide (OpenSky + adsb.lol), military-flagged aircraft, origin → destination routes, past track, ETA, follow camera, and a forecast simulator that projects every plane up to 2 hours ahead.
 * 🧭 **Layer system**: switch on ships (AIS, incl. military), satellites (incl. publicly catalogued military), nuclear power plants, military bases, mapped bunkers, earthquakes, wildfires/storms/volcanoes, rain radar and day/night. Layers that are off cost nothing.
 * 📐 **Draw, measure & analyse**: mark points, lines, areas, boxes and circles with the mouse. Get area/length with real-world comparisons, terrain elevation of just that area, nearby features, a base map applied only there, what's visible from a point, and which satellites are overhead.
-* 🌊 **What-if simulations**: landslide runout, flood / sea-level rise and tsunami (earthquake → ocean travel time → coastal flooding), computed with simplified physical models in C.
+* 🌊 **Live physics engine**: run heavy rain, river floods and dam breaks, storm tides, tsunamis, cyclones, landslides, avalanches, lava, wildfires and plumes on the 3D map, with real terrain and OSM buildings the water flows around. It's written in C/WebAssembly and validated against analytic solutions.
 * ⚙️ **Light on the GPU**: renders on demand, not 60 fps nonstop. Eco / Balanced / Quality modes; heavy maths runs in C compiled to WebAssembly in a Web Worker.
 * 💎 **Cyber-Glass HUD**: Translucent dark glassmorphism interface with real-time camera telemetry (Latitude, Longitude, Altitude), live FPS monitor, and responsive touch/mouse navigation.
 * 🆓 **Free & open services**: no paid keys. One optional free key (aisstream.io) unlocks worldwide ships.
@@ -166,6 +166,57 @@ Each result lists affected settlements and spells out its assumptions. These are
 
 ---
 
+## 🌊 Physics Engine (Simulate tab)
+
+Draw an area (and a point or track where needed) in **Tools**, pick a disaster in **Simulate**, and watch it unfold: a live 3D water surface (foam where flow is supercritical), flow and wind particles, gauges with hydrographs, and a timeline from ×1 to ×3600.
+
+| Disaster | Physics |
+| :--- | :--- |
+| Heavy rainfall / cloudburst | Rain hyetograph, Green–Ampt infiltration by soil, shallow-water runoff around buildings; or the fast basin model; plus an instant "where it collects" answer |
+| River flood / dam break | Inflow hydrograph at a breach point |
+| Storm tide | Rising sea level on the coastal edges |
+| Tsunami | Okada (1985) seafloor uplift (matches Okada's check table) → nonlinear shallow water with Coriolis over NOAA ETOPO |
+| Cyclone + surge | Holland vortex (Vickery & Wadhera radius/shape) moving along your track: wind stress + inverse barometer surge, R-CLIPER rain, landfall decay |
+| Landslide / debris flow, avalanche | Voellmy rheology (Coulomb + turbulent friction) |
+| Lava | Bingham lava whose yield strength and viscosity rise as it cools (radiation + ground conduction) |
+| Wildfire | Rothermel spread with wind and slope; ellipse arrival times by minimum travel time with exact two-point updates |
+| Smoke / ash / gas plume | Semi-Lagrangian advection–diffusion with removal |
+
+### Algorithms
+
+**Established methods**
+* Finite-volume shallow water with hydrostatic reconstruction (Audusse et al. 2004) and the HLLC Riemann solver; well-balanced and positivity-preserving.
+* Integral-porosity buildings (Sanders et al. 2008).
+* Draining time step (Bollermann et al. 2011).
+* Okada (1985), Holland (1980), Rothermel (1972) / Anderson (1983), Green–Ampt.
+
+**New in this engine.** None of these appeared in the literature I searched, and each is validated in `wasm/test/`:
+
+* **EDLTS: event-driven local time stepping.** The grid is cut into 16×16 blocks. Each block takes its own power-of-two step and is advanced in order of a priority queue (discrete-event simulation), not in synchronous level cycles. Dry *or* still blocks sleep until a neighbour's flux actually changes them. Face time cursors make every face flux count once, so mass is conserved to about 1e-15. Each side carries only its deviation from its own hydrostatic pressure, so a pond stays exactly at rest across block boundaries even with mixed steps. Result: 4.3× faster than a dense solver on a rain-plus-river catchment, with answers within 2%.
+* **HBG: hierarchical basin-graph hydrodynamics.**
+  * The depression hierarchy comes from steepest-descent basins, sill widths and Kruskal merging by sill height. Each basin's hypsometry is exact, so its level–volume relation and inverse are exact.
+  * *Instant mode* routes rain through the hierarchy (Fill–Spill–Merge style).
+  * *Dynamic mode* is a weir network with Villemonte drowned-weir submergence, integrated implicitly with a conservative predictor–corrector.
+  * Results: exact mass balance, hand-computed lake levels reproduced exactly, and 28× faster than full shallow water at 0.2 m depth RMSE.
+* **GRSR terrain reconstruction.** Geoid correction, a Hampel spike test, Laplace membrane hole filling and slope-adaptive multi-scale morphological bare-earth estimation. Published filters use a constant slope instead.
+* **Fire-front solver.** Minimum travel time on a 32-direction stencil, refined with exact two-point updates under the local fire-ellipse (Randers) metric, which is convex so a golden-section search finds the optimum. It brings the fire shape to within 5% of Anderson's length-to-breadth ratio (a 16-direction sweep was 65% off).
+
+**Limits.** These are physically based screening models, not certified hazard tools:
+* no sewers or drainage;
+* no wave dispersion or wind waves;
+* one fuel type at a time;
+* grids of roughly 5–20 m for cities and 1–4 km for oceans.
+
+Run the checks:
+
+```bash
+node wasm/test/swe.test.mjs      # lake at rest, Ritter dam-break, mass, EDLTS vs dense
+node wasm/test/hbg.test.mjs      # instant/dynamic mass balance, three-bowl lake levels, HBG vs SWE
+node wasm/test/hazards.test.mjs  # Okada table, cyclone Rmax, fire circle/ellipse, plume mass
+```
+
+---
+
 ## ⚙️ Performance & the C core
 
 * The globe **renders only when something changes**. Planes, ships and satellites update a few times a second on a shared ticker instead of every frame, and nothing animates in a hidden tab.
@@ -177,7 +228,11 @@ Each result lists affected settlements and spells out its assumptions. These are
 | `geo.c` | Geodesic distance, polygon area/perimeter, polygon masks, batch dead reckoning of aircraft |
 | `sgp4.c` | SGP4 orbit propagation (matches satellite.js for low orbits), ground tracks, pass prediction |
 | `terrain.c` | Elevation statistics, slope, hillshaded colour maps, viewshed |
-| `landslide.c` · `tsunami.c` · `flood.c` | The simulations above |
+| `landslide.c` · `tsunami.c` · `flood.c` | Quick static estimates in the Tools tab |
+| `terrain/geoid.c` · `terrain/clean.c` | EGM96 geoid, terrain tile reconstruction (GRSR) |
+| `sim/swe.c` · `sim/edlts.c` | Shallow-flow solver and the event-driven scheduler (physics.wasm, SIMD) |
+| `sim/hbg.c` | Basin-graph hydrodynamics |
+| `sim/okada.c` · `sim/cyclone.c` · `sim/fire.c` · `sim/plume.c` | Tsunami source, cyclone forcing, wildfire, plumes and tracers |
 
 Rebuild with `npm run build:wasm` (also runs automatically before `dev` and `build`).
 
@@ -226,7 +281,9 @@ worldy/
     ├── perf.js · ticker.js · camera.js · urlState.js   # performance modes, animation ticker, terrain-safe camera, shareable URL
     ├── compute/                 # wasm loader, compute worker, promise client
     ├── datalayers/              # layer registry + ships, satellites, nuclear, OSM sites, quakes, events, radar, day/night
-    ├── tools/                   # drawing, grids/terrain sampling, analyses & simulations
+    ├── tools/                   # drawing, grids/terrain sampling, analyses & quick estimates
+    ├── terrain/                 # CleanTerrainProvider (geoid + reconstruction workers), geoid lookup
+    ├── sim/                     # physics engine: worker, scenarios, grids, OSM buildings, live water/tracer rendering
     ├── flights/
     │   ├── api.js               # OpenSky / adsb.lol / adsbdb fetchers, normalised flight shape
     │   ├── predict.js           # Great-circle dead reckoning, route forecast, ETA
@@ -234,7 +291,8 @@ worldy/
     │   └── useFlights.js        # Polling, merging, filters, selection state
     └── components/
         ├── Globe.jsx            # Core CesiumJS viewer, scene tuning, and tile caching
-        ├── LayerPanel.jsx       # Tabbed side panel: Map / Layers / Tools / Settings
+        ├── LayerPanel.jsx       # Tabbed side panel: Map / Layers / Tools / Simulate / Settings
+        ├── SimulatePanel.jsx · SimTimeline.jsx · GaugeChart.jsx   # Simulate tab, live clock, gauges
         ├── DataLayersPanel.jsx  # Layers tab with per-layer options
         ├── ToolsPanel.jsx       # Draw, analyse, simulate
         ├── InfoCard.jsx · ResultCard.jsx   # Picked item details · tool results
@@ -270,6 +328,7 @@ Worldy utilizes open data and services provided by:
 * [OpenSky Network](https://opensky-network.org/), [adsb.lol](https://adsb.lol/) (ODbL), [adsbdb](https://www.adsbdb.com/)
 * [MeMoMaps](https://memomaps.de/)
 * [Fintraffic Digitraffic](https://www.digitraffic.fi/) (CC BY 4.0), [aisstream.io](https://aisstream.io/)
+* [GeographicLib](https://geographiclib.sourceforge.io/) EGM96 geoid grid
 * [CelesTrak](https://celestrak.org/), [GeoNuclearData](https://github.com/cristianst85/GeoNuclearData) (ODbL), [USGS](https://www.usgs.gov/), [NASA EONET](https://eonet.gsfc.nasa.gov/), [RainViewer](https://www.rainviewer.com/), [NOAA ETOPO](https://www.ncei.noaa.gov/products/etopo-global-relief-model)
 
 ---

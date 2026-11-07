@@ -235,7 +235,11 @@ static void sources(Sim *s, int c, double dt, double t0) {
     double W = w_sqrt(s->wx[c] * s->wx[c] + s->wy[c] * s->wy[c]);
     if (W > 0 && h > 0.05) {
       double cd = w_min(0.0035, (0.75 + 0.067 * W) * 1e-3);
-      double k = RHO_AIR / RHO_SEA * cd * W * dt;
+      /* Over land, surface roughness slows the wind (≈15% of the stress over open water), and
+       * stress acting on a very thin sheet is tapered by h/(h+1): set-up ∝ τ/(ρgh) would
+       * otherwise pile centimetres of water into tens of metres. */
+      double land = s->z[c] > 0 ? 0.15 : 1.0;
+      double k = RHO_AIR / RHO_SEA * cd * W * dt * land * h / (h + 1.0);
       s->qx[c] += k * s->wx[c];
       s->qy[c] -= k * s->wy[c]; /* wy is northward; grid y points south */
     }
@@ -290,6 +294,13 @@ static void sources(Sim *s, int c, double dt, double t0) {
   }
   s->qx[c] = qx * scale;
   s->qy[c] = qy * scale;
+  /* stability guard: depth-averaged flows above 30 m/s are unphysical here */
+  double u2 = (s->qx[c] * s->qx[c] + s->qy[c] * s->qy[c]) / (h * h);
+  if (u2 > 900.0) {
+    double r = 30.0 / w_sqrt(u2);
+    s->qx[c] *= r;
+    s->qy[c] *= r;
+  }
 
   /* Lava cooling: radiation from the surface + conduction into the ground. */
   if (s->temp) {

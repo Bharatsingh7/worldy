@@ -318,7 +318,7 @@ SCENARIOS.push(
     modes: ['swe'],
     kind: 'fire',
     render: 2,
-    domainPad: 1.5,
+    domainPad: 0.4,
     params: [
       { key: 'wind', label: 'Wind', min: 0, max: 25, step: 1, default: 8, unit: 'm/s' },
       { key: 'windTo', label: 'Blowing towards', min: 0, max: 355, step: 5, default: 45, unit: '°' },
